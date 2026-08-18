@@ -1,0 +1,1772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WAY Faculty Portal</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏛️</text></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Noto Sans',-apple-system,BlinkMacSystemFont,sans-serif;background:#f0f2f5;color:#1a1a2e;min-height:100vh}
+    input:focus{outline:none}
+    button{cursor:pointer}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script>
+const { useState, useEffect, useCallback, createElement: h } = React;
+
+// ── API ──
+const API_URL = 'https://script.google.com/macros/s/AKfycbz6UPrdXAZlEbUCUHXlE-8BDFNufruftlrx_MAuvfI7wezGjW4-AtPf_k1FuEgHv1wX/exec';
+function callApi(action, payload){
+  // No Content-Type header → avoids CORS preflight (Apps Script doesn't handle OPTIONS)
+  return fetch(API_URL, {
+    method:'POST',
+    body: JSON.stringify(Object.assign({action:action}, payload||{}))
+  }).then(function(r){return r.json()});
+}
+
+// Drive 파일을 Apps Script로 proxy 다운로드 (session 검증 후 base64 → blob 다운로드 트리거)
+function downloadProxyFile(fileType){
+  var token = (typeof sessionStorage!=='undefined') ? sessionStorage.getItem('portal_token') : null;
+  return callApi('downloadFile', {token:token, fileType:fileType}).then(function(res){
+    if(!res || !res.success){
+      alert((res && res.message) || 'Download failed');
+      return;
+    }
+    var bin = atob(res.data);
+    var bytes = new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+    var blob = new Blob([bytes], {type: res.mimeType || 'application/octet-stream'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = res.fileName || 'download';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){URL.revokeObjectURL(url);}, 1000);
+  }).catch(function(err){
+    alert('Download failed: ' + (err && err.message ? err.message : err));
+  });
+}
+
+// ── Theme ──
+const T = {
+  navy:'#003764', navyL:'#0a4a7a', navyD:'#002244',
+  gold:'#C4972A', red:'#c41230', green:'#0d9668', greenL:'#d1fae5',
+  amber:'#d97706', amberL:'#fef3c7', bg:'#f0f2f5', card:'#fff',
+  text:'#1a1a2e', sub:'#5a6070', bdr:'#e2e5ea'
+};
+
+// ── SVG Icons ──
+function Ico({d,w,h:hh,sw,ch}){
+  return React.createElement('svg',{width:w||20,height:hh||20,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:sw||2,strokeLinecap:'round',strokeLinejoin:'round'},
+    ...(Array.isArray(d)?d:[d]).map(function(p,i){
+      if(typeof p==='string') return React.createElement('path',{key:i,d:p});
+      return React.createElement(p.t||'path',Object.assign({key:i},p));
+    }),
+    ch||null
+  );
+}
+var Icons = {
+  dashboard: function(){return Ico({d:[{t:'rect',x:'3',y:'3',width:'7',height:'7',rx:'1'},{t:'rect',x:'14',y:'3',width:'7',height:'7',rx:'1'},{t:'rect',x:'3',y:'14',width:'7',height:'7',rx:'1'},{t:'rect',x:'14',y:'14',width:'7',height:'7',rx:'1'}]})},
+  courses: function(){return Ico({d:['M4 19.5A2.5 2.5 0 016.5 17H20','M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z']})},
+  documents: function(){return Ico({d:['M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z','M14 2v6h6']})},
+  notices: function(){return Ico({d:['M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9','M13.73 21a2 2 0 01-3.46 0']})},
+  logout: function(){return Ico({d:['M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4',{t:'polyline',points:'16 17 21 12 16 7'},{t:'line',x1:'21',y1:'12',x2:'9',y2:'12'}]})},
+  check: function(){return Ico({d:[{t:'polyline',points:'20 6 9 17 4 12'}],w:16,h:16,sw:2.5})},
+  clock: function(){return Ico({d:[{t:'circle',cx:'12',cy:'12',r:'10'},{t:'polyline',points:'12 6 12 12 16 14'}],w:16,h:16})},
+  alert: function(){return Ico({d:[{t:'circle',cx:'12',cy:'12',r:'10'},{t:'line',x1:'12',y1:'8',x2:'12',y2:'12'},{t:'line',x1:'12',y1:'16',x2:'12.01',y2:'16'}],w:16,h:16})},
+  download: function(){return Ico({d:['M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4',{t:'polyline',points:'7 10 12 15 17 10'},{t:'line',x1:'12',y1:'15',x2:'12',y2:'3'}],w:16,h:16})},
+  mail: function(){return Ico({d:['M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z',{t:'polyline',points:'22,6 12,13 2,6'}]})},
+  shield: function(){return Ico({d:['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'],w:14,h:14})},
+  admin: function(){return Ico({d:[{t:'path',d:'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2'},{t:'circle',cx:'9',cy:'7',r:'4'},{t:'path',d:'M23 21v-2a4 4 0 00-3-3.87'},{t:'path',d:'M16 3.13a4 4 0 010 7.75'}]})},
+  send: function(){return Ico({d:[{t:'line',x1:'22',y1:'2',x2:'11',y2:'13'},{t:'polygon',points:'22 2 15 22 11 13 2 9 22 2'}],w:14,h:14})},
+  salary: function(){return Ico({d:[{t:'rect',x:'2',y:'5',width:'20',height:'14',rx:'2'},{t:'line',x1:'2',y1:'10',x2:'22',y2:'10'},{t:'line',x1:'6',y1:'15',x2:'10',y2:'15'}]})},
+  events: function(){return Ico({d:[{t:'rect',x:'3',y:'4',width:'18',height:'18',rx:'2'},{t:'line',x1:'16',y1:'2',x2:'16',y2:'6'},{t:'line',x1:'8',y1:'2',x2:'8',y2:'6'},{t:'line',x1:'3',y1:'10',x2:'21',y2:'10'}]})},
+  chevL: function(){return Ico({d:[{t:'polyline',points:'15 18 9 12 15 6'}],w:16,h:16})},
+  chevR: function(){return Ico({d:[{t:'polyline',points:'9 18 15 12 9 6'}],w:16,h:16})},
+};
+// ── Mock Data (fallback for unconnected fields) ──
+var MOCK = {
+  courses:[
+    {code:'GLC3146',title:'Korean Pop Culture and Visual Art',session:'1st',period:'6-week',days:'Mon/Wed',time:'10:00-11:50',location:'Samsung Hall 401',syllabusLink:null},
+    {code:'GLC2138',title:'Introduction to Korean Studies',session:'2nd',period:'6-week',days:'Tue/Thu',time:'14:00-15:50',location:'Daewoo Hall 201',syllabusLink:null},
+  ],
+  documents:{
+    contract:{status:'pending',date:'',fileName:'Contract.pdf',hasFile:false,link:null},
+    reappointment:{applicable:false},
+  },
+  housing:{applicable:false},
+  resources:[],
+  salary:{submitted:false,open:true,submittedAt:'',updatedAt:'',deadline:'',yearLabel:'2026-2027 WAY',payment4w:'',payment6w:'',contactEmail:'isummer@yonsei.ac.kr',payments:{courses:[],total:'',hasData:false},data:{}},
+  flight:{eligible:false,files:[]},
+  events:[],
+  calendar:[],
+};
+
+// 대시보드 + 공지를 동시에 로드해서 faculty state로 머지될 객체 반환 (실패 시 null)
+function loadPortalData(token){
+  return Promise.all([
+    callApi('getDashboard',{token:token}),
+    callApi('getNotices',{token:token}),
+    callApi('getEvents',{token:token})
+  ]).then(function(results){
+    var dash=results[0], nx=results[1], ex=results[2];
+    if(dash.expired||nx.expired||(ex&&ex.expired)) return null;
+    if(!dash.success) return null;
+    return Object.assign({},MOCK,dash.faculty,{
+      notices:(nx.success&&nx.notices)?nx.notices:[],
+      events:(ex&&ex.success&&ex.events)?ex.events:[],
+      documents: dash.documents || MOCK.documents,
+      courses: dash.courses || MOCK.courses,
+      housing: dash.housing || MOCK.housing,
+      resources: dash.resources || MOCK.resources,
+      salary: dash.salary || MOCK.salary,
+      flight: dash.flight || MOCK.flight,
+      calendar: dash.calendar || MOCK.calendar,
+    });
+  });
+}
+
+// ── Helpers ──
+function S(){return Object.assign.apply(null,[{}].concat(Array.prototype.slice.call(arguments)))}
+
+function Card(props){
+  return h('div',{style:S({background:T.card,borderRadius:14,boxShadow:'0 1px 4px rgba(0,0,0,.06)',border:'1px solid '+T.bdr,padding:24},props.style||{})},props.children);
+}
+
+function Badge(props){
+  var m={signed:{bg:T.greenL,c:T.green,t:'Signed'},submitted:{bg:T.greenL,c:T.green,t:'Submitted'},partial:{bg:T.amberL,c:T.amber,t:'Partial'},pending:{bg:'#fef2f2',c:T.red,t:'Pending'}};
+  var s=m[props.status]||m.pending;
+  return h('span',{style:{display:'inline-flex',alignItems:'center',gap:4,padding:'4px 10px',borderRadius:20,fontSize:12,fontWeight:600,background:s.bg,color:s.c}},
+    (props.status==='signed'||props.status==='submitted')?Icons.check():Icons.clock(),' ',s.t);
+}
+
+// ── Program Calendar helpers ──
+var CAL_MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// 분류별 색 팔레트 — 시트 E열의 분류가 등장 순서대로 색을 배정받음 (같은 분류 = 같은 색)
+var CAL_COLORS=['#2563eb','#db2777','#0d9668','#7c3aed','#0891b2','#d97706'];
+function calAlpha(hex,a){return 'rgba('+parseInt(hex.slice(1,3),16)+','+parseInt(hex.slice(3,5),16)+','+parseInt(hex.slice(5,7),16)+','+a+')'}
+function calFmt(y,m,d){return y+'-'+('0'+m).slice(-2)+'-'+('0'+d).slice(-2)}
+function calLabel(s){var p=s.split('-');return CAL_MONTHS[+p[1]-1]+' '+(+p[2])}
+// RSVP 행사 일시(자유 텍스트) → YYYY-MM-DD 베스트에포트 파싱. 실패 시 null(달력에서 제외).
+function calParseFree(s){
+  if(!s)return null;
+  var m=String(s).match(/(\d{4})[-.\/](\d{1,2})[-.\/](\d{1,2})/);
+  if(m)return calFmt(+m[1],+m[2],+m[3]);
+  var d=new Date(s);
+  return(!isNaN(d.getTime())&&d.getFullYear()>=2020&&d.getFullYear()<=2100)?calFmt(d.getFullYear(),d.getMonth()+1,d.getDate()):null;
+}
+
+// ── Main App ──
+function App(){
+  var initialScreen = (typeof sessionStorage!=='undefined' && sessionStorage.getItem('portal_token')) ? 'restoring' : 'login';
+  var _s=useState(initialScreen),screen=_s[0],setScreen=_s[1];
+  var _e=useState(''),employeeId=_e[0],setEmployeeId=_e[1];
+  var _d=useState(''),dob=_d[0],setDob=_d[1];
+  var _o=useState(''),otp=_o[0],setOtp=_o[1];
+  var _ec=useState(0),emailCount=_ec[0],setEmailCount=_ec[1];
+  var _l=useState(false),loading=_l[0],setLoading=_l[1];
+  var _er=useState(''),error=_er[0],setError=_er[1];
+  var _t=useState('dashboard'),tab=_t[0],setTab=_t[1];
+  var _f=useState(null),faculty=_f[0],setFaculty=_f[1];
+  var _n=useState(null),selNotice=_n[0],setSelNotice=_n[1];
+  var _dl=useState(null),downloading=_dl[0],setDownloading=_dl[1];
+
+  // 페이지 로드 시 세션 복원 시도
+  useEffect(function(){
+    if(initialScreen!=='restoring') return;
+    var token=sessionStorage.getItem('portal_token');
+    loadPortalData(token).then(function(data){
+      if(data){setFaculty(data);if(data.isAdmin)setTab('admin');setScreen('portal');}
+      else{sessionStorage.removeItem('portal_token');setScreen('login');}
+    }).catch(function(){
+      // 네트워크 에러: 토큰 보존하고 로그인 화면으로 (다음 시도에서 복원 재시도 가능)
+      setScreen('login');
+    });
+  },[]);
+
+  function handleLogin(){
+    var eid = employeeId.trim().toUpperCase();
+    if(!eid){setError('Please enter your Employee ID.');return;}
+    var dobDigits = (dob||'').replace(/\D/g,'');
+    if(dobDigits.length!==6){setError('Please enter your date of birth as YYMMDD (6 digits).');return;}
+    setLoading(true);setError('');
+    callApi('verifyIdentity',{employeeId:eid,birthDate:dobDigits}).then(function(res){
+      setLoading(false);
+      if(res.success){setScreen('otp');setOtp('');setEmailCount(res.emailCount||1);}
+      else{setError(res.message||'Verification failed.');}
+    }).catch(function(){
+      setLoading(false);setError('Network error. Please try again.');
+    });
+  }
+  function handleOtpVerify(){
+    if(otp.length!==6){setError('Please enter the 6-digit code.');return;}
+    var eid = employeeId.trim().toUpperCase();
+    setLoading(true);setError('');
+    callApi('verifyOtp',{employeeId:eid,otp:otp}).then(function(res){
+      if(!(res.success&&res.token)){
+        setLoading(false);setError(res.message||'Verification failed.');return;
+      }
+      sessionStorage.setItem('portal_token',res.token);
+      return loadPortalData(res.token).then(function(data){
+        setLoading(false);
+        if(data){setFaculty(data);if(data.isAdmin)setTab('admin');setScreen('portal');}
+        else{sessionStorage.removeItem('portal_token');setError('Failed to load portal data.');}
+      });
+    }).catch(function(){
+      setLoading(false);setError('Network error. Please try again.');
+    });
+  }
+  function handleLogout(){
+    sessionStorage.removeItem('portal_token');
+    setScreen('login');setFaculty(null);setEmployeeId('');setDob('');setOtp('');setError('');setEmailCount(0);setTab('dashboard');setSelNotice(null);
+  }
+
+  // ── Styles ──
+  var fadeStyle = h('style',null,'@keyframes fadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}@media(min-width:768px){.desk-show{display:block!important}.mob-hide{display:none!important}}');
+  var loginBg = {minHeight:'100vh',background:'linear-gradient(135deg,'+T.navyD+' 0%,'+T.navy+' 50%,'+T.navyL+' 100%)',display:'flex',alignItems:'center',justifyContent:'center',padding:20,fontFamily:"'Noto Sans',-apple-system,sans-serif"};
+  var inputStyle = function(v){return{width:'100%',padding:'10px 14px',border:'1.5px solid '+T.bdr,borderRadius:8,fontSize:14,fontFamily:'inherit',outline:'none',boxSizing:'border-box'}};
+  var btnPrimary = {width:'100%',padding:'12px 16px',background:T.navy,color:'#fff',border:'none',borderRadius:10,fontSize:14,fontWeight:600,fontFamily:'inherit'};
+
+  // ── RESTORING (세션 복원 중) ──
+  if(screen==='restoring'){
+    return h('div',{style:loginBg},
+      h('div',{style:{color:'rgba(255,255,255,.7)',fontSize:13,fontFamily:"'Noto Sans',-apple-system,sans-serif"}},'Restoring session...')
+    );
+  }
+
+  // ── LOGIN ──
+  if(screen==='login'){
+    return h('div',{style:loginBg},
+      fadeStyle,
+      h('div',{style:{width:'100%',maxWidth:420,animation:'fadeIn .5s ease'}},
+        h('div',{style:{textAlign:'center',marginBottom:32}},
+          h('div',{style:{width:64,height:64,background:'rgba(255,255,255,.12)',borderRadius:16,display:'inline-flex',alignItems:'center',justifyContent:'center',marginBottom:16}},
+            h('span',{style:{fontSize:28}},'🏛️')),
+          h('h1',{style:{color:'#fff',fontSize:26,fontFamily:"'Playfair Display',serif",fontWeight:700,margin:'0 0 4px',letterSpacing:'-.5px'}},'WAY Faculty Portal'),
+          h('p',{style:{color:'rgba(255,255,255,.6)',fontSize:13,margin:0}},'Winter Abroad at Yonsei')
+        ),
+        h('div',{style:{background:'#fff',borderRadius:16,padding:'32px 28px',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}},
+          h('div',{style:{marginBottom:14}},
+            h('label',{style:{display:'block',fontSize:12,fontWeight:600,color:T.text,marginBottom:6}},'Employee ID (교번)'),
+            h('input',{type:'text',value:employeeId,onChange:function(e){setEmployeeId(e.target.value)},placeholder:'Z0000000',autoCapitalize:'characters',autoCorrect:'off',spellCheck:false,style:S(inputStyle(),{letterSpacing:1,fontFamily:"'Noto Sans',monospace"})})
+          ),
+          h('div',{style:{marginBottom:20}},
+            h('label',{style:{display:'block',fontSize:12,fontWeight:600,color:T.text,marginBottom:6}},'Date of Birth (YYMMDD)'),
+            h('input',{type:'text',value:dob,onChange:function(e){setDob(e.target.value.replace(/\D/g,'').slice(0,6))},placeholder:'YYMMDD',inputMode:'numeric',maxLength:6,autoComplete:'off',style:S(inputStyle(),{letterSpacing:1,fontFamily:"'Noto Sans',monospace"})})
+          ),
+          error&&h('p',{style:{fontSize:13,color:T.red,margin:'0 0 14px',padding:'8px 12px',background:'#fef2f2',borderRadius:8}},error),
+          h('button',{onClick:handleLogin,disabled:loading,style:S(btnPrimary,{opacity:loading?.7:1})},loading?'Verifying...':'Send Verification Code'),
+          h('p',{style:{fontSize:11,color:T.sub,textAlign:'center',margin:'16px 0 0',lineHeight:1.5,display:'flex',alignItems:'center',justifyContent:'center',gap:4}},
+            Icons.shield(),' A 6-digit code will be sent to your registered email(s)')
+        ),
+        h('p',{style:{textAlign:'center',fontSize:11,color:'rgba(255,255,255,.4)',marginTop:20}},'Office of International Affairs, Yonsei University')
+      )
+    );
+  }
+
+  // ── OTP ──
+  if(screen==='otp'){
+    return h('div',{style:loginBg},
+      fadeStyle,
+      h('div',{style:{width:'100%',maxWidth:420,animation:'fadeIn .5s ease'}},
+        h('div',{style:{textAlign:'center',marginBottom:32,color:'#fff'}},
+          h('div',{style:{width:64,height:64,background:'rgba(255,255,255,.12)',borderRadius:16,display:'inline-flex',alignItems:'center',justifyContent:'center',marginBottom:16,color:'#fff'}},Icons.mail()),
+          h('h2',{style:{fontSize:22,margin:'0 0 6px',fontFamily:"'Playfair Display',serif"}},'Check Your Email'),
+          h('p',{style:{color:'rgba(255,255,255,.6)',fontSize:13,margin:0}},
+            emailCount>1
+              ? ['We sent a code to ',h('strong',{style:{color:'rgba(255,255,255,.85)'}},'all '+emailCount+' of your registered emails')]
+              : ['We sent a code to your registered email'])
+        ),
+        h('div',{style:{background:'#fff',borderRadius:16,padding:'32px 28px',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}},
+          h('div',{style:{marginBottom:20}},
+            h('label',{style:{display:'block',fontSize:12,fontWeight:600,color:T.text,marginBottom:6}},'Verification Code'),
+            h('input',{type:'text',value:otp,onChange:function(e){setOtp(e.target.value.replace(/\D/g,'').slice(0,6))},placeholder:'000000',maxLength:6,style:{width:'100%',padding:14,border:'1.5px solid '+T.bdr,borderRadius:8,fontSize:28,fontWeight:700,textAlign:'center',letterSpacing:12,outline:'none',boxSizing:'border-box',fontFamily:"'Noto Sans',monospace"}})
+          ),
+          error&&h('p',{style:{fontSize:13,color:T.red,margin:'0 0 14px',padding:'8px 12px',background:'#fef2f2',borderRadius:8}},error),
+          h('button',{onClick:handleOtpVerify,disabled:loading||otp.length<6,style:S(btnPrimary,{opacity:(loading||otp.length<6)?.6:1})},loading?'Verifying...':'Sign In'),
+          h('div',{style:{display:'flex',justifyContent:'space-between',marginTop:16}},
+            h('button',{onClick:function(){setScreen('login');setError('');},style:{background:'none',border:'none',color:T.navy,fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'}},'← Back'),
+            h('button',{onClick:function(){
+              setError('');setLoading(true);
+              var eid=employeeId.trim().toUpperCase();
+              var dobDigits=(dob||'').replace(/\D/g,'');
+              callApi('verifyIdentity',{employeeId:eid,birthDate:dobDigits}).then(function(res){
+                setLoading(false);
+                if(res.success){setOtp('');alert('A new code has been sent to your email'+(res.emailCount>1?'s':'')+'.');}
+                else{setError(res.message||'Failed to resend code.');}
+              }).catch(function(){setLoading(false);setError('Network error.');});
+            },disabled:loading,style:{background:'none',border:'none',color:T.sub,fontSize:13,cursor:loading?'wait':'pointer',fontFamily:'inherit'}},'Resend code')
+          )
+        ),
+        h('p',{style:{textAlign:'center',fontSize:11,color:'rgba(255,255,255,.35)',marginTop:16}},'Code expires in 5 minutes')
+      )
+    );
+  }
+
+  // ── PORTAL ──
+  // 교원 분류 (G2): 'DOMESTIC_FT' = 국내(전임). 해외/국내(외부)는 기존 동작.
+  var isFT = faculty.category==='DOMESTIC_FT';
+  var salaryOpen = !(faculty.salary && faculty.salary.open===false);  // salary_open=N 이면 Salary 탭 숨김 (소프트 오픈)
+  var tabs = faculty.isAdmin===true
+    ? [
+        {key:'admin',label:'Admin',icon:Icons.admin},
+        {key:'notices',label:'Notices',icon:Icons.notices},
+      ]
+    : [
+        {key:'dashboard',label:'Dashboard',icon:Icons.dashboard},
+        {key:'courses',label:'My Courses',icon:Icons.courses},
+        {key:'documents',label:'Documents',icon:Icons.documents},
+        {key:'salary',label:'Salary',icon:Icons.salary},
+        {key:'events',label:'Events',icon:Icons.events},
+        {key:'notices',label:'Notices',icon:Icons.notices},
+      ].filter(function(t){ return !(isFT && t.key==='documents'); })  // 검수5: 전임은 Documents 숨김
+       .filter(function(t){ return !(t.key==='salary' && !salaryOpen); });  // salary_open=N 이면 숨김
+
+  // Dashboard 달력: PortalCalendar 일정(navy) + RSVP 행사(gold, 날짜 파싱 가능한 것만).
+  // 데이터가 하나도 없으면 카드 자체를 숨김. 월 이동 자유 — 연도 하드코딩 없음.
+  function CalendarCard(){
+    var _ym=useState(null),ymOv=_ym[0],setYm=_ym[1];     // 'YYYY-MM' — null이면 기본 월
+    var _sd=useState(null),selDay=_sd[0],setSelDay=_sd[1]; // 선택된 날짜 'YYYY-MM-DD'
+    var entries=(faculty.calendar||[]).map(function(c){
+      return {start:c.start,end:(c.end&&c.end>c.start)?c.end:null,title:c.title,description:c.description||'',category:c.category||'',rsvp:false};
+    });
+    (faculty.events||[]).forEach(function(ev){
+      var d=calParseFree(ev.datetime);
+      if(d)entries.push({start:d,end:null,title:ev.title,description:[ev.datetime,ev.location].filter(Boolean).join(' · '),category:'',rsvp:true});
+    });
+    if(entries.length===0)return null;
+    entries.sort(function(a,b){return a.start<b.start?-1:1});
+
+    // 분류 → 색 (등장 순서대로 팔레트 배정, RSVP 행사는 gold 고정)
+    var cats=[];
+    entries.forEach(function(e){if(!e.rsvp&&cats.indexOf(e.category)===-1)cats.push(e.category)});
+    function catColor(e){return e.rsvp?T.gold:CAL_COLORS[cats.indexOf(e.category)%CAL_COLORS.length]}
+    var hasRsvp=entries.some(function(e){return e.rsvp});
+    var showLegend=hasRsvp||cats.length>1||(cats.length===1&&cats[0]);
+
+    var now=new Date(),todayS=calFmt(now.getFullYear(),now.getMonth()+1,now.getDate());
+    var minYm=entries[0].start.slice(0,7);
+    var maxYm=entries.reduce(function(mx,e){var v=(e.end||e.start).slice(0,7);return v>mx?v:mx},minYm);
+    var defYm=todayS.slice(0,7);if(defYm<minYm)defYm=minYm;if(defYm>maxYm)defYm=maxYm;
+    var ym=ymOv||defYm;
+    var y=+ym.slice(0,4),mo=+ym.slice(5,7);
+    var dim=new Date(y,mo,0).getDate(),fdow=new Date(y,mo-1,1).getDay();
+    var first=calFmt(y,mo,1),last=calFmt(y,mo,dim);
+
+    function covers(e,dateS){return e.end?(e.start<=dateS&&dateS<=e.end):e.start===dateS}
+    var monthEntries=entries.filter(function(e){return e.start<=last&&(e.end||e.start)>=first});
+    // 기간 일정 → 레인 배정 (겹치면 아래 레인으로)
+    var monthRanges=monthEntries.filter(function(e){return e.end});
+    var laneEnds=[];
+    monthRanges.forEach(function(e){
+      var li=0;while(li<laneEnds.length&&laneEnds[li]>=e.start)li++;
+      e.lane=li;laneEnds[li]=e.end;
+    });
+    var listEntries=selDay?entries.filter(function(e){return covers(e,selDay)}):monthEntries;
+    function nav(delta){
+      var m2=mo+delta,y2=y;
+      if(m2<1){m2=12;y2--}if(m2>12){m2=1;y2++}
+      setYm(y2+'-'+('0'+m2).slice(-2));setSelDay(null);
+    }
+    var navBtn={background:'none',border:'1px solid '+T.bdr,borderRadius:6,width:26,height:26,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:T.sub,padding:0};
+    var cells=[];
+    for(var b=0;b<fdow;b++)cells.push(null);
+    for(var d=1;d<=dim;d++)cells.push(d);
+
+    return h(Card,null,
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,gap:8}},
+        h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:0}},'📅 Program Calendar'),
+        h('div',{style:{display:'flex',alignItems:'center',gap:4}},
+          h('button',{onClick:function(){nav(-1)},style:navBtn},Icons.chevL()),
+          h('span',{style:{fontSize:13,fontWeight:700,color:T.text,minWidth:80,textAlign:'center'}},CAL_MONTHS[mo-1]+' '+y),
+          h('button',{onClick:function(){nav(1)},style:navBtn},Icons.chevR()))),
+      showLegend?h('div',{style:{display:'flex',flexWrap:'wrap',gap:'4px 12px',marginBottom:10}},
+        cats.map(function(c,i){
+          return h('span',{key:i,style:{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,color:T.sub,fontWeight:600}},
+            h('span',{style:{width:7,height:7,borderRadius:4,background:CAL_COLORS[i%CAL_COLORS.length],flexShrink:0}}),c||'Program');
+        }),
+        hasRsvp&&h('span',{style:{display:'inline-flex',alignItems:'center',gap:5,fontSize:11,color:T.sub,fontWeight:600}},
+          h('span',{style:{width:7,height:7,borderRadius:4,background:T.gold,flexShrink:0}}),'Event (RSVP)')):null,
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2,marginBottom:2}},
+        ['S','M','T','W','T','F','S'].map(function(w,i){
+          return h('div',{key:i,style:{textAlign:'center',fontSize:10,fontWeight:700,color:T.sub,padding:'4px 0'}},w);
+        })),
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2}},
+        cells.map(function(d,i){
+          if(d===null)return h('div',{key:'b'+i});
+          var dateS=calFmt(y,mo,d);
+          var dayEv=monthEntries.filter(function(e){return covers(e,dateS)});
+          var dayColors=[];
+          dayEv.forEach(function(e){if(!e.end){var col=catColor(e);if(dayColors.indexOf(col)===-1)dayColors.push(col)}});
+          var isSel=selDay===dateS,isToday=dateS===todayS;
+          // 이 칸에서 시작하는 기간 밴드 세그먼트 (기간 시작일·주 시작·월 1일에서만 그려 주 단위로 이어붙임)
+          var dow=(fdow+d-1)%7,segs=[];
+          monthRanges.forEach(function(e){
+            if(!covers(e,dateS)||!(e.start===dateS||dow===0||d===1))return;
+            var endDay=(e.end<=last)?+e.end.slice(8,10):dim;
+            var segEnd=Math.min(endDay,d+6-dow);
+            segs.push({lane:e.lane,span:segEnd-d+1,capL:e.start===dateS,capR:segEnd===endDay&&e.end<=last,col:catColor(e),title:e.title});
+          });
+          return h('div',{key:dateS,onClick:function(){setSelDay(dayEv.length&&selDay!==dateS?dateS:null)},style:{
+            textAlign:'center',padding:'5px 0 3px',borderRadius:8,minHeight:34,position:'relative',
+            cursor:dayEv.length?'pointer':'default',
+            background:isSel?T.navy:'transparent',
+            border:isToday&&!isSel?'1.5px solid '+T.gold:'1.5px solid transparent'}},
+            h('div',{style:{fontSize:12,fontWeight:(isToday||isSel)?700:400,color:isSel?'#fff':T.text,lineHeight:'16px'}},d),
+            h('div',{style:{height:6,display:'flex',justifyContent:'center',gap:2}},
+              dayColors.slice(0,3).map(function(col,ci){
+                return h('span',{key:ci,style:{width:4,height:4,borderRadius:2,background:isSel?'#fff':col,marginTop:1}});
+              })),
+            laneEnds.length?h('div',{style:{position:'relative',height:laneEnds.length*14-2,marginTop:1}},
+              segs.map(function(s,si){
+                return h('div',{key:si,style:{position:'absolute',top:s.lane*14,left:0,height:12,zIndex:1,pointerEvents:'none',
+                  width:'calc('+s.span*100+'% + '+(s.span-1)*2+'px)',boxSizing:'border-box',
+                  background:calAlpha(s.col,.16),color:s.col,
+                  borderRadius:(s.capL?6:0)+'px '+(s.capR?6:0)+'px '+(s.capR?6:0)+'px '+(s.capL?6:0)+'px',
+                  fontSize:9,fontWeight:700,lineHeight:'12px',padding:'0 5px',textAlign:'left',
+                  whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},s.title);
+              })):null);
+        })),
+      h('div',{style:{marginTop:12,borderTop:'1px solid '+T.bdr,paddingTop:10}},
+        listEntries.length===0
+          ?h('p',{style:{fontSize:12,color:T.sub,fontStyle:'italic',margin:0}},'No scheduled dates this month.')
+          :listEntries.map(function(e,i){
+            var when=e.end?calLabel(e.start)+' – '+calLabel(e.end):calLabel(e.start);
+            return h('div',{key:i,onClick:e.rsvp?function(){setTab('events')}:undefined,style:{display:'flex',gap:10,padding:'7px 0',borderBottom:i<listEntries.length-1?'1px solid '+T.bdr:'none',cursor:e.rsvp?'pointer':'default',alignItems:'baseline'}},
+              h('span',{style:{fontSize:11,fontWeight:700,color:T.sub,whiteSpace:'nowrap',minWidth:78}},when),
+              h('span',{style:{width:7,height:7,borderRadius:4,background:catColor(e),flexShrink:0,alignSelf:'center'}}),
+              h('div',{style:{flex:1,minWidth:0}},
+                h('div',{style:{fontSize:13,fontWeight:600,color:T.text}},e.title,e.rsvp&&h('span',{style:{fontSize:10,fontWeight:700,color:T.gold,marginLeft:6}},'RSVP →')),
+                e.description?h('div',{style:{fontSize:11,color:T.sub,marginTop:1,lineHeight:1.4}},e.description):null));
+          }))
+    );
+  }
+
+  function DashboardTab(){
+    var programResources = (faculty.resources||[]).filter(function(r){ return !({invitationLetter:1,businessRegistration:1})[r.key]; });
+    return h('div',{style:{display:'flex',flexDirection:'column',gap:16}},
+      h('div',{style:{background:'linear-gradient(135deg,'+T.navy+','+T.navyL+')',borderRadius:14,padding:'28px 24px',color:'#fff'}},
+        h('p',{style:{fontSize:13,opacity:.7,margin:'0 0 4px'}},'Welcome back,'),
+        h('h2',{style:{fontSize:24,fontWeight:700,margin:'0 0 4px',fontFamily:"'Playfair Display',serif"}},faculty.name),
+        h('p',{style:{fontSize:12,opacity:.6,margin:'4px 0 0'}},'Faculty ID: '+faculty.employeeId)
+      ),
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:12}},
+        [{l:'Courses',v:faculty.courses.length,c:T.navy},!isFT&&{l:'Contract',v:faculty.documents.contract.status==='signed'?'Signed':'Pending',c:faculty.documents.contract.status==='signed'?T.green:T.amber},{l:'Notices',v:faculty.notices.length,c:T.navy}].filter(Boolean).map(function(s,i){
+          return h(Card,{key:i,style:{textAlign:'center',padding:'18px 12px'}},
+            h('div',{style:{fontSize:24,fontWeight:700,color:s.c}},s.v),
+            h('div',{style:{fontSize:12,color:T.sub,marginTop:2}},s.l));
+        })
+      ),
+      h(Card,null,
+        h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:'0 0 14px'}},'Action Required'),
+        (function(){
+          var actions=[];
+          if(!isFT && faculty.documents.contract.status!=='signed'){
+            actions.push({key:'contract',label:'Sign your employment contract — check your email for the signing link and all related documents.',link:faculty.documents.contract.link,tab:'documents'});
+          }
+          if(faculty.documents.reappointment.applicable && faculty.documents.reappointment.status!=='submitted'){
+            // 포털 업로드 방식이면 외부 링크가 없으므로 Documents 탭으로 보낸다.
+            actions.push(faculty.documents.reappointment.mode==='portal'
+              ?{key:'reappointment',label:'Submit reappointment documents',tab:'documents'}
+              :{key:'reappointment',label:'Submit reappointment documents',link:faculty.documents.reappointment.link});
+          }
+          if(salaryOpen && !isFT && faculty.salary && !faculty.salary.submitted){
+            actions.push({key:'salary',label:'Submit salary disbursement form'+(faculty.salary.deadline?(' (by '+faculty.salary.deadline+')'):''),tab:'salary'});
+          }
+          if(salaryOpen && faculty.flight && faculty.flight.eligible && !(faculty.flight.files||[]).length){
+            actions.push({key:'flight',label:'Upload flight reimbursement documents (e-ticket receipt, boarding pass, etc.)',tab:'salary'});
+          }
+          (faculty.events||[]).forEach(function(ev){
+            var responded=ev.myResponse!=null&&ev.myResponse!=='';
+            if(!ev.deadlinePassed && !responded){
+              actions.push({key:'rsvp_'+ev.id,label:'RSVP for "'+ev.title+'"'+(ev.deadline?(' (by '+ev.deadline+')'):''),tab:'events'});
+            }
+          });
+          if(actions.length===0){
+            return h('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:T.greenL,borderRadius:8}},
+              h('span',{style:{color:T.green}},Icons.check()),h('span',{style:{fontSize:13,color:T.green,fontWeight:500}},'All tasks completed!'));
+          }
+          return actions.map(function(a){
+            var openBtn = a.tab
+              ? h('button',{onClick:function(){setTab(a.tab)},style:{background:'none',border:'none',padding:0,fontSize:12,color:T.navy,fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',fontFamily:'inherit'}},'Open →')
+              : a.link
+                ? h('a',{href:a.link,target:'_blank',rel:'noopener noreferrer',style:{fontSize:12,color:T.navy,fontWeight:600,textDecoration:'none',whiteSpace:'nowrap'}},'Open →')
+                : null;
+            return h('div',{key:a.key,style:{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:T.amberL,borderRadius:8,marginBottom:8}},
+              h('span',{style:{color:T.amber}},Icons.alert()),
+              h('span',{style:{fontSize:13,flex:1}},a.label),
+              openBtn);
+          });
+        })()
+      ),
+      h(CalendarCard),
+      faculty.housing&&faculty.housing.applicable&&h(Card,null,
+        h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,gap:8,flexWrap:'wrap'}},
+          h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:0}},'🏠 Stay at Somerset Palace'),
+          h('span',{style:{fontSize:11,fontWeight:700,color:T.navy,background:'rgba(0,55,100,.08)',padding:'3px 8px',borderRadius:4}},faculty.housing.program)),
+        h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:8,fontSize:13,color:T.sub}},
+          h('div',null,h('strong',{style:{color:T.text,fontWeight:600}},'Check-in: '),faculty.housing.checkin||'—'),
+          h('div',null,h('strong',{style:{color:T.text,fontWeight:600}},'Check-out: '),faculty.housing.checkout||'—'),
+          faculty.housing.guests&&h('div',null,h('strong',{style:{color:T.text,fontWeight:600}},'Guests/Bed: '),faculty.housing.guests)),
+        h('p',{style:{fontSize:11,color:T.sub,fontStyle:'italic',margin:'12px 0 0',lineHeight:1.5}},'*If you wish to change your accommodation or have a question, please contact ',h('a',{href:'mailto:isummer@yonsei.ac.kr',style:{color:T.navy}},'isummer@yonsei.ac.kr'),' / ',h('a',{href:'mailto:christine.park@the-ascott.com',style:{color:T.navy}},'christine.park@the-ascott.com'),'.')),
+      h(Card,null,
+        h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:'0 0 14px'}},'Recent Notices'),
+        faculty.notices.slice(0,3).map(function(n){
+          return h('div',{key:n.id,onClick:function(){setTab('notices');setSelNotice(n);},style:{padding:'10px 0',borderBottom:'1px solid '+T.bdr,cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+            h('div',null,
+              h('div',{style:{fontSize:13,fontWeight:600,color:T.text}},n.title),
+              h('div',{style:{fontSize:11,color:T.sub,marginTop:2}},n.date)),
+            n.priority==='high'&&h('span',{style:{padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:600,background:'#fef2f2',color:T.red}},'Important'));
+        })
+      ),
+      programResources.length>0&&h(Card,null,
+        h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:'0 0 12px'}},'📚 Program Resources'),
+        h('div',{style:{display:'flex',flexDirection:'column',gap:6}},
+          programResources.map(function(r){
+            return h('a',{key:r.key,href:r.url,target:'_blank',rel:'noopener noreferrer',style:{display:'flex',alignItems:'center',gap:8,padding:'10px 12px',background:'#f8f9fb',borderRadius:8,fontSize:13,color:T.text,textDecoration:'none',fontWeight:500}},
+              h('span',{style:{color:T.navy}},Icons.download()),
+              h('span',{style:{flex:1}},r.title),
+              h('span',{style:{fontSize:12,color:T.navy,fontWeight:600}},'Open →'));
+          })))
+    );
+  }
+
+  function CoursesTab(){
+    // 편집 기간이 닫혀 있으면 서버가 editLink 자체를 안 내려준다. 여기서는 마감일 안내만 담당.
+    var syllEdit = faculty.syllabusEdit || {};
+    return h('div',{style:{display:'flex',flexDirection:'column',gap:16}},
+      h('h2',{style:{fontSize:20,fontWeight:700,color:T.navy,margin:0,fontFamily:"'Playfair Display',serif"}},'My Courses'),
+      faculty.courses.length===0?
+        h(Card,null,h('p',{style:{fontSize:13,color:T.sub,margin:0,textAlign:'center'}},'No courses assigned yet.'))
+      :faculty.courses.map(function(c,i){
+        var meta=[
+          c.session && ['Session', c.session],
+          c.period && ['Period', c.period],
+          c.time && ['Time', c.time],
+          c.days && ['Days', c.days],
+          c.location && ['Location', c.location],
+          c.enrollment && ['Enrollment', c.enrollment],
+        ].filter(Boolean);
+        return h(Card,{key:i},
+          h('div',{style:{marginBottom:12}},
+            h('span',{style:{fontSize:11,fontWeight:700,color:T.navy,background:'rgba(0,55,100,.08)',padding:'3px 8px',borderRadius:4}},c.code),
+            h('h3',{style:{fontSize:16,fontWeight:700,color:T.text,margin:'8px 0 0'}},c.title)),
+          meta.length>0 && h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:8,marginBottom:14,fontSize:12,color:T.sub}},
+            meta.map(function(m,j){
+              return h('div',{key:j},h('strong',{style:{color:T.text,fontWeight:600}},m[0]+': '),m[1]);
+            })),
+          (c.syllabusLink||c.editLink)?
+            h('div',null,
+              h('div',{style:{display:'flex',flexWrap:'wrap',gap:8}},
+                c.syllabusLink&&h('a',{href:c.syllabusLink,target:'_blank',rel:'noopener noreferrer',style:{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',background:'rgba(0,55,100,.06)',color:T.navy,textDecoration:'none',borderRadius:8,fontSize:13,fontWeight:600,width:'fit-content'}},Icons.download(),' View Syllabus'),
+                c.editLink&&h('a',{href:c.editLink,target:'_blank',rel:'noopener noreferrer',style:{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',background:T.navy,color:'#fff',textDecoration:'none',borderRadius:8,fontSize:13,fontWeight:600,width:'fit-content'}},'Edit Syllabus')),
+              c.editLink&&syllEdit.deadline&&h('p',{style:{fontSize:11,color:T.navy,fontWeight:600,margin:'8px 0 0'}},'Editable until '+syllEdit.deadline+'.'),
+              c.syllabusLink&&h('p',{style:{fontSize:11,color:T.sub,fontStyle:'italic',margin:'8px 0 0',lineHeight:1.5}},'Note: This syllabus is the version posted on the WAY website Course list section. It is not synced with the Yonsei Portal System (연세학사포탈: http://portal.yonsei.ac.kr). If revisions are needed, they must also be made to the Yonsei Portal System.'))
+          :h('span',{style:{fontSize:12,color:T.sub,fontStyle:'italic'}},'Syllabus not yet available'),
+          c.tas && c.tas.length>0 && h('div',{style:{marginTop:14,paddingTop:12,borderTop:'1px solid '+T.bdr}},
+            h('div',{style:{fontSize:12,fontWeight:700,color:T.navy,marginBottom:8}},'Teaching Assistant'+(c.tas.length>1?'s':'')),
+            c.tas.map(function(ta,k){
+              var line=[ta.name,ta.affiliation].filter(Boolean).join(' · ');
+              return h('div',{key:k,style:{fontSize:12,color:T.sub,marginBottom:k<c.tas.length-1?6:0}},
+                line?h('span',{style:{color:T.text,fontWeight:600}},line):null,
+                ta.email?h('span',null,(line?' — ':'')+ta.email):null);
+            }))
+        );
+      })
+    );
+  }
+
+  function DocumentsTab(){
+    var contractDocKeys = {invitationLetter:1, businessRegistration:1};
+    var contractDocs = (faculty.resources||[]).filter(function(r){return contractDocKeys[r.key]});
+
+    // 재임용 서류 — REAPPOINTMENT_MODE='portal'이면 포털에서 직접 업로드받는다(동계~).
+    // 'external'이면 기존처럼 외부 재임용 웹앱으로 링크만 건다(하계).
+    var reapp = faculty.documents.reappointment || {};
+    var _rd=useState(reapp.docTypes||[]),reappDocs=_rd[0],setReappDocs=_rd[1];
+    var _rb=useState(''),reappBusy=_rb[0],setReappBusy=_rb[1];   // 업로드 중인 docType key
+    var _rm=useState(''),reappMsg=_rm[0],setReappMsg=_rm[1];
+    var reappDone = reappDocs.filter(function(d){return d.uploaded}).length;
+    var reappStatus = reappDocs.length&&reappDone===reappDocs.length?'submitted':(reappDone>0?'partial':'pending');
+
+    function onReappFile(docKey,e){
+      var f=(e.target.files||[])[0];
+      e.target.value='';
+      if(!f) return;
+      if(['application/pdf','image/jpeg','image/png'].indexOf(f.type)===-1){setReappMsg('Only PDF, JPG, or PNG files are allowed. / PDF·JPG·PNG만 업로드할 수 있습니다.');return;}
+      if(f.size>10*1024*1024){setReappMsg('File exceeds the 10MB limit: '+f.name);return;}
+      setReappMsg(''); setReappBusy(docKey);
+      var reader=new FileReader();
+      reader.onload=function(){
+        var b64=String(reader.result).split(',')[1];
+        callApi('uploadReappointmentFile',{token:sessionStorage.getItem('portal_token'),docType:docKey,file:{name:f.name,mimeType:f.type,data:b64}}).then(function(res){
+          setReappBusy('');
+          if(res.expired){handleLogout();return;}
+          if(!res.success){setReappMsg(res.message||('Upload failed: '+f.name));return;}
+          if(res.status&&res.status.docTypes) setReappDocs(res.status.docTypes);
+        }).catch(function(){setReappBusy('');setReappMsg('Network error while uploading '+f.name);});
+      };
+      reader.onerror=function(){setReappBusy('');setReappMsg('Could not read file: '+f.name);};
+      reader.readAsDataURL(f);
+    }
+
+    var reappPortalCard = h(Card,null,
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}},
+        h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:0}},'📄 Reappointment Documents'),
+        Badge({status:reappStatus})),
+      h('p',{style:{fontSize:12,color:T.sub,margin:'0 0 12px'}},'재임용 서류 제출'),
+      h('div',{style:{marginBottom:12,padding:'10px 12px',background:'#f8f9fb',borderRadius:8,fontSize:12,color:T.sub,lineHeight:1.55}},
+        h('p',{style:{margin:0,color:T.text}},'Please upload each of the documents below. PDF, JPG, or PNG — up to 10MB per file.'),
+        h('p',{style:{margin:'4px 0 0'}},'아래 서류를 각각 업로드해 주세요. PDF·JPG·PNG, 파일당 10MB.'),
+        h('p',{style:{margin:'4px 0 0'}},'Re-uploading replaces the previous submission for that document. / 같은 서류를 다시 올리면 최신 파일로 갱신됩니다.')),
+      h('div',{style:{display:'flex',flexDirection:'column',gap:8}},
+        reappDocs.map(function(d){
+          var busy = reappBusy===d.key;
+          return h('div',{key:d.key,style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,padding:'10px 12px',background:d.uploaded?'#f1f8f3':'#f8f9fb',border:'1px solid '+(d.uploaded?'#cfe6d8':T.bdr),borderRadius:8}},
+            h('div',{style:{minWidth:0}},
+              h('div',{style:{fontSize:13,fontWeight:600,color:d.uploaded?T.green:T.text}},(d.uploaded?'✓ ':'')+d.name),
+              h('div',{style:{fontSize:11,color:T.sub,marginTop:1}},d.nameKr),
+              d.uploaded&&h('div',{style:{fontSize:11,color:T.sub,marginTop:3,wordBreak:'break-all'}},'📎 '+d.fileName+(d.uploadedAt?(' · '+d.uploadedAt):''))),
+            h('label',{style:{flexShrink:0,display:'inline-flex',alignItems:'center',gap:5,padding:'7px 14px',background:reappBusy?'#9ca3af':(d.uploaded?'rgba(0,55,100,.06)':T.navy),color:d.uploaded&&!reappBusy?T.navy:'#fff',borderRadius:9,fontSize:12,fontWeight:600,cursor:reappBusy?'wait':'pointer',whiteSpace:'nowrap'}},
+              busy?'Uploading…':(d.uploaded?'Replace ↑':'Upload ↑'),
+              h('input',{type:'file',accept:'.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png',disabled:!!reappBusy,onChange:function(e){onReappFile(d.key,e)},style:{display:'none'}})));
+        })),
+      reappMsg&&h('div',{style:{marginTop:10,padding:'8px 12px',background:reappBusy?'#f8f9fb':'#fef2f2',color:reappBusy?T.sub:T.red,borderRadius:8,fontSize:12}},reappMsg));
+    return h('div',{style:{display:'flex',flexDirection:'column',gap:16}},
+      h('h2',{style:{fontSize:20,fontWeight:700,color:T.navy,margin:0,fontFamily:"'Playfair Display',serif"}},'Documents'),
+      h(Card,null,
+        h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
+          h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:0}},'📝 Office of International Affairs Contract'),
+          Badge({status:faculty.documents.contract.status})),
+        h('p',{style:{fontSize:11,color:T.sub,fontStyle:'italic',margin:'0 0 12px',lineHeight:1.5}},'This Office of International Affairs (OIA) Contract is independent of and separate from your appointment contract with the Yonsei University Faculty Affairs Team.'),
+        faculty.documents.contract.status==='signed' && h('p',{style:{fontSize:13,color:T.sub,margin:'0 0 12px'}},'Signed on '+faculty.documents.contract.date),
+        faculty.documents.contract.status==='signed'?
+          (faculty.documents.contract.hasFile?
+            h('button',{onClick:function(){
+              setDownloading('contract');
+              downloadProxyFile('contract').then(function(){setDownloading(null);});
+            },disabled:downloading==='contract',style:{padding:'8px 16px',background:'rgba(0,55,100,.06)',color:T.navy,border:'none',borderRadius:8,fontSize:13,fontWeight:600,fontFamily:'inherit',display:'inline-flex',alignItems:'center',gap:6,cursor:downloading==='contract'?'wait':'pointer',width:'fit-content',opacity:downloading==='contract'?0.6:1}},
+              downloading==='contract'?'Downloading…':[Icons.download(),' '+faculty.documents.contract.fileName])
+          :h('span',{style:{fontSize:12,color:T.sub}},'PDF not available'))
+        :faculty.documents.contract.link?
+          h('div',null,
+            h('div',{style:{display:'flex',flexWrap:'wrap',gap:8}},
+              h('a',{href:faculty.documents.contract.link,target:'_blank',rel:'noopener noreferrer',style:{padding:'8px 16px',background:T.navy,color:'#fff',border:'none',borderRadius:8,fontSize:13,fontWeight:600,fontFamily:'inherit',display:'inline-flex',alignItems:'center',gap:6,textDecoration:'none',width:'fit-content'}},'Sign Contract →')),
+            h('p',{style:{fontSize:14,fontWeight:600,color:T.red,margin:'10px 0 0',lineHeight:1.5}},'Please review the detailed contract sent to your email before signing.'))
+        :null,
+        contractDocs.length>0&&h('div',{style:{marginTop:14,paddingTop:14,borderTop:'1px solid '+T.bdr}},
+          h('div',{style:{fontSize:12,color:T.sub,fontWeight:600,marginBottom:8}},'Related documents'),
+          h('div',{style:{display:'flex',flexDirection:'column',gap:6}},
+            contractDocs.map(function(r){
+              return h('a',{key:r.key,href:r.url,target:'_blank',rel:'noopener noreferrer',style:{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',background:'#f8f9fb',borderRadius:8,fontSize:13,color:T.text,textDecoration:'none',fontWeight:500}},
+                h('span',{style:{color:T.navy}},Icons.download()),
+                h('span',{style:{flex:1}},r.title),
+                h('span',{style:{fontSize:12,color:T.navy,fontWeight:600}},'Open →'));
+            })))),
+      faculty.documents.reappointment.applicable&&(reapp.mode==='portal'?reappPortalCard:h(Card,null,
+        h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}},
+          h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:0}},'📄 Faculty Affairs Reappointment Documents'),
+          Badge({status:faculty.documents.reappointment.status})),
+        h('p',{style:{fontSize:13,color:T.sub,margin:'0 0 12px'}},(faculty.documents.reappointment.files||[]).length===0?'No documents submitted yet':('Last submitted on '+faculty.documents.reappointment.date)),
+        (faculty.documents.reappointment.files||[]).length>0&&h('div',{style:{display:'flex',flexDirection:'column',gap:8,marginBottom:12}},
+          (faculty.documents.reappointment.files||[]).map(function(f,i){
+            var canDownload = (f==='Consent Form') && faculty.documents.reappointment.consentAvailable;
+            var isDownloading = downloading==='consent';
+            return h('div',{key:i,style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 12px',background:'#f8f9fb',borderRadius:8,gap:10}},
+              h('span',{style:{fontSize:13,color:T.text}},f),
+              canDownload?h('button',{onClick:function(){
+                setDownloading('consent');
+                downloadProxyFile('consent').then(function(){setDownloading(null);});
+              },disabled:isDownloading,style:{background:'none',border:'none',padding:0,display:'inline-flex',alignItems:'center',gap:4,color:T.navy,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:isDownloading?'wait':'pointer',opacity:isDownloading?0.6:1}},
+                isDownloading?'Downloading…':[Icons.download(),' Download']):null);
+          })),
+        faculty.documents.reappointment.status!=='submitted'&&faculty.documents.reappointment.link?
+          h('a',{href:faculty.documents.reappointment.link,target:'_blank',rel:'noopener noreferrer',style:{padding:'8px 16px',background:T.navy,color:'#fff',borderRadius:8,fontSize:13,fontWeight:600,fontFamily:'inherit',display:'inline-flex',alignItems:'center',gap:6,textDecoration:'none',width:'fit-content'}},'Submit Documents →')
+        :null))
+    );
+  }
+
+  function NoticesTab(){
+    return h('div',{style:{display:'flex',flexDirection:'column',gap:16}},
+      h('h2',{style:{fontSize:20,fontWeight:700,color:T.navy,margin:0,fontFamily:"'Playfair Display',serif"}},'Notices'),
+      selNotice?
+        h(Card,null,
+          h('button',{onClick:function(){setSelNotice(null)},style:{background:'none',border:'none',color:T.navy,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit',padding:0,marginBottom:16}},'← Back to list'),
+          h('div',{style:{marginBottom:8}},
+            selNotice.priority==='high'&&h('span',{style:{padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:600,background:'#fef2f2',color:T.red,marginRight:8}},'Important'),
+            h('span',{style:{fontSize:12,color:T.sub}},selNotice.date)),
+          h('h3',{style:{fontSize:18,fontWeight:700,color:T.text,margin:'0 0 16px'}},selNotice.title),
+          h('p',{style:{fontSize:14,color:T.text,lineHeight:1.7}},selNotice.content)):
+        faculty.notices.map(function(n){
+          return h(Card,{key:n.id,style:{cursor:'pointer'}},
+            h('div',{onClick:function(){setSelNotice(n)},style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}},
+              h('div',null,
+                h('div',{style:{display:'flex',alignItems:'center',gap:8,marginBottom:4}},
+                  n.priority==='high'&&h('span',{style:{padding:'2px 8px',borderRadius:10,fontSize:10,fontWeight:600,background:'#fef2f2',color:T.red}},'Important'),
+                  h('span',{style:{fontSize:12,color:T.sub}},n.date)),
+                h('h3',{style:{fontSize:15,fontWeight:600,color:T.text,margin:0}},n.title),
+                h('p',{style:{fontSize:13,color:T.sub,margin:'6px 0 0',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:400}},n.content)),
+              h('span',{style:{fontSize:18,color:T.bdr}},'›')));
+        })
+    );
+  }
+
+  function EventsTab(){
+    var _e=useState(null),events=_e[0],setEvents=_e[1];
+    var _l=useState(true),loadingEv=_l[0],setLoadingEv=_l[1];
+    var _er=useState(''),evErr=_er[0],setEvErr=_er[1];
+    var _p=useState({}),picks=_p[0],setPicks=_p[1];          // eventId -> 선택(제출 전)
+    var _x=useState({}),extras=_x[0],setExtras=_x[1];         // eventId -> 추가 자유입력(제출 전)
+    var _s=useState(null),submitting=_s[0],setSubmitting=_s[1]; // 제출 중인 eventId
+
+    function loadEvents(){
+      var token=sessionStorage.getItem('portal_token');
+      setLoadingEv(true);setEvErr('');
+      callApi('getEvents',{token:token}).then(function(res){
+        setLoadingEv(false);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){setEvErr(res.message||'Failed to load events.');return;}
+        setEvents(res.events||[]);
+      }).catch(function(){setLoadingEv(false);setEvErr('Network error.');});
+    }
+    useEffect(function(){loadEvents();},[]);
+
+    function submit(ev){
+      var choice=picks[ev.id];
+      if(!choice){alert('Please select a response.');return;}
+      var extraVal=(extras[ev.id]||'').trim();
+      if(ev.extraLabel&&ev.extraRequired&&!extraVal){alert('Please answer: '+ev.extraLabel);return;}
+      if(!confirm('Submit "'+choice+'"?\n\nResponses cannot be changed after submitting.')) return;
+      var token=sessionStorage.getItem('portal_token');
+      setSubmitting(ev.id);
+      callApi('submitRsvp',{token:token,eventId:ev.id,response:choice,extra:extraVal}).then(function(res){
+        setSubmitting(null);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message||'Submit failed.');return;}
+        loadEvents();
+        // 대시보드 Action Required와 동기화 (전체 재로드 없이 해당 행사만 응답 처리)
+        setFaculty(function(prev){return prev?Object.assign({},prev,{events:(prev.events||[]).map(function(e){return e.id===ev.id?Object.assign({},e,{myResponse:choice,myExtra:extraVal}):e;})}):prev;});
+      }).catch(function(){setSubmitting(null);alert('Network error.');});
+    }
+
+    return h('div',{style:{display:'flex',flexDirection:'column',gap:16}},
+      h('h2',{style:{fontSize:20,fontWeight:700,color:T.navy,margin:0,fontFamily:"'Playfair Display',serif"}},'Events'),
+      loadingEv?
+        h(Card,null,h('p',{style:{fontSize:13,color:T.sub,margin:0,textAlign:'center'}},'Loading events…'))
+      :evErr?
+        h(Card,null,h('p',{style:{fontSize:13,color:T.red,margin:0,textAlign:'center'}},evErr))
+      :(!events||events.length===0)?
+        h(Card,null,h('p',{style:{fontSize:13,color:T.sub,margin:0,textAlign:'center'}},'No events to RSVP at the moment.'))
+      :events.map(function(ev){
+        var busy=submitting===ev.id;
+        var responded=ev.myResponse!=null&&ev.myResponse!=='';
+        var closed=ev.deadlinePassed;
+        return h(Card,{key:ev.id},
+          h('h3',{style:{fontSize:16,fontWeight:700,color:T.text,margin:'0 0 8px'}},ev.title),
+          h('div',{style:{display:'flex',flexDirection:'column',gap:5,fontSize:13,color:T.sub,marginBottom:12}},
+            ev.datetime&&h('span',null,'📅 '+ev.datetime),
+            ev.location&&h('span',null,'📍 '+ev.location),
+            ev.deadline&&h('span',{style:{color:closed?T.red:T.sub,fontWeight:600}},'⏰ RSVP Deadline: '+ev.deadline)
+          ),
+          ev.description&&h('p',{style:{fontSize:13,color:T.text,lineHeight:1.6,margin:'0 0 14px',whiteSpace:'pre-wrap'}},ev.description),
+          responded?
+            h('div',null,
+              h('div',{style:{padding:'10px 14px',background:T.greenL,borderRadius:8,fontSize:13,color:T.green}},
+                h('div',{style:{display:'flex',alignItems:'center',gap:8,fontWeight:600}},Icons.check(),' You responded: ',ev.myResponse),
+                ev.extraLabel&&ev.myExtra&&h('div',{style:{marginTop:6,fontWeight:500}},ev.extraLabel+': ',h('span',{style:{fontWeight:400}},ev.myExtra))),
+              h('p',{style:{fontSize:11,color:T.sub,margin:'8px 0 0',lineHeight:1.5}},'Responses are final. If you need to change your response, please contact ',h('a',{href:'mailto:isummer@yonsei.ac.kr',style:{color:T.navy,fontWeight:600}},'isummer@yonsei.ac.kr'),'.'))
+          :closed?
+            h('div',{style:{padding:'10px 14px',background:'#f0f2f5',borderRadius:8,fontSize:13,fontWeight:600,color:T.sub}},'RSVP is closed.')
+          :h('div',null,
+            h('div',{style:{display:'flex',flexDirection:'column',gap:8,marginBottom:12}},
+              (ev.options||[]).map(function(opt,oi){
+                var sel=picks[ev.id]===opt;
+                return h('button',{key:oi,onClick:function(){setPicks(function(p){return Object.assign({},p,(function(o){var x={};x[ev.id]=opt;return x;})())})},
+                  style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',border:'1.5px solid '+(sel?T.navy:T.bdr),borderRadius:10,background:sel?'rgba(0,55,100,.05)':'#fff',cursor:'pointer',fontFamily:'inherit',fontSize:13,fontWeight:sel?600:400,color:T.text,textAlign:'left'}},
+                  h('span',{style:{width:16,height:16,borderRadius:'50%',border:'2px solid '+(sel?T.navy:T.bdr),flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}},
+                    sel&&h('span',{style:{width:8,height:8,borderRadius:'50%',background:T.navy}})),
+                  opt);
+              })
+            ),
+            ev.extraLabel&&h('div',{style:{marginBottom:12}},
+              h('label',{style:{fontSize:12,fontWeight:600,color:T.text,display:'block',marginBottom:6}},ev.extraLabel,ev.extraRequired&&h('span',{style:{color:T.red}},' *')),
+              h('input',{type:'text',value:extras[ev.id]||'',placeholder:'Type your answer…',onChange:function(e){var v=e.target.value;setExtras(function(p){return Object.assign({},p,(function(){var x={};x[ev.id]=v;return x;})())})},style:S(inputStyle(),{fontSize:13,padding:'8px 10px'})})
+            ),
+            (function(){
+              var missingExtra=ev.extraLabel&&ev.extraRequired&&!(extras[ev.id]||'').trim();
+              var disabled=busy||!picks[ev.id]||missingExtra;
+              return h('div',{style:{display:'flex',justifyContent:'flex-end'}},
+                h('button',{onClick:function(){submit(ev)},disabled:disabled,
+                  style:{padding:'9px 20px',background:disabled?'#9ca3af':T.navy,color:'#fff',border:'none',borderRadius:10,fontSize:13,fontWeight:600,fontFamily:'inherit',cursor:disabled?'not-allowed':'pointer'}},
+                  busy?'Submitting…':'Submit RSVP'));
+            })()
+          )
+        );
+      })
+    );
+  }
+
+  function AdminTab(){
+    var _r=useState(null),roster=_r[0],setRoster=_r[1];
+    var _l=useState(true),loadingAdmin=_l[0],setLoadingAdmin=_l[1];
+    var _e=useState(''),adminError=_e[0],setAdminError=_e[1];
+    var _s=useState(false),sending=_s[0],setSending=_s[1];
+    var _x=useState(null),exporting=_x[0],setExporting=_x[1]; // eid currently exporting, or 'BULK'
+    var _xr=useState(null),exportReport=_xr[0],setExportReport=_xr[1]; // {exported:[], skipped:[], folderUrl}
+    var _sel=useState(null),selEid=_sel[0],setSelEid=_sel[1];
+    var _sd=useState(null),salaryDetail=_sd[0],setSalaryDetail=_sd[1];
+    var _sdl=useState(false),sdLoading=_sdl[0],setSdLoading=_sdl[1];
+    var _sds=useState(false),sdSaving=_sds[0],setSdSaving=_sds[1];
+    var _ann=useState(null),announcing=_ann[0],setAnnouncing=_ann[1]; // eid currently sending individual announce
+    var _sso=useState(false),settingsOpen=_sso[0],setSettingsOpen=_sso[1];
+    var _ss=useState(null),salarySettings=_ss[0],setSalarySettings=_ss[1];
+    var _ssl=useState(false),ssLoading=_ssl[0],setSsLoading=_ssl[1];
+    var _sss=useState(false),ssSaving=_sss[0],setSsSaving=_sss[1];
+    var _no=useState(false),noticesOpen=_no[0],setNoticesOpen=_no[1];
+    var _nl=useState(null),noticesList=_nl[0],setNoticesList=_nl[1];
+    var _nn=useState(false),noticesLoading=_nn[0],setNoticesLoading=_nn[1];
+    var _ne=useState(null),editNotice=_ne[0],setEditNotice=_ne[1]; // notice being edited or {new:true}
+    var _lo=useState(false),linksOpen=_lo[0],setLinksOpen=_lo[1];
+    var _ll=useState(null),linksList=_ll[0],setLinksList=_ll[1];
+    var _lld=useState(false),linksLoading=_lld[0],setLinksLoading=_lld[1];
+    var _le=useState(null),editLink=_le[0],setEditLink=_le[1];
+    var _eo=useState(false),eventsOpen=_eo[0],setEventsOpen=_eo[1];
+    var _evl=useState(null),eventsList=_evl[0],setEventsList=_evl[1];
+    var _evd=useState(false),eventsLoading=_evd[0],setEventsLoading=_evd[1];
+    var _eve=useState(null),editEvent=_eve[0],setEditEvent=_eve[1];
+
+    function loadRoster(){
+      var token=sessionStorage.getItem('portal_token');
+      setLoadingAdmin(true);setAdminError('');
+      callApi('adminListFaculty',{token:token}).then(function(res){
+        setLoadingAdmin(false);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){setAdminError(res.message||'Failed to load roster.');return;}
+        setRoster(res.faculty||[]);
+      }).catch(function(){
+        setLoadingAdmin(false);setAdminError('Network error.');
+      });
+    }
+    useEffect(function(){loadRoster();},[]);
+
+    function updateFaculty(eid,updates){
+      var token=sessionStorage.getItem('portal_token');
+      return callApi('adminUpdateFaculty',{token:token,employeeId:eid,updates:updates}).then(function(res){
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message||'Update failed.');return;}
+        loadRoster();
+      }).catch(function(){alert('Network error.');});
+    }
+
+    function exportRemittance(eid){
+      var token=sessionStorage.getItem('portal_token');
+      setExporting(eid);setAdminError('');
+      callApi('adminExportRemittance',{token:token,employeeId:eid}).then(function(res){
+        setExporting(null);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert('Export failed: '+(res.message||'unknown'));return;}
+        if(res.url) window.open(res.url,'_blank','noopener');
+      }).catch(function(err){
+        setExporting(null);alert('Export error: '+(err&&err.message||err||'Network or parse failure'));
+      });
+    }
+
+    function exportRemittanceBulk(){
+      var ready=(roster||[]).filter(function(f){return f.salaryStatus==='ready'}).length;
+      if(ready===0){alert('No faculty are ready for export (Currency + Amount must be filled in the Submissions sheet).');return;}
+      if(!confirm('Export remittance forms for '+ready+' ready faculty?\n\nRows missing Currency or Amount will be skipped and listed afterward.')) return;
+      var token=sessionStorage.getItem('portal_token');
+      setExporting('BULK');setAdminError('');setExportReport(null);
+      callApi('adminExportRemittanceBulk',{token:token}).then(function(res){
+        setExporting(null);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert('Bulk export failed: '+(res.message||'unknown'));return;}
+        setExportReport({exported:res.exported||[],skipped:res.skipped||[],folderUrl:res.folderUrl||''});
+      }).catch(function(err){
+        setExporting(null);alert('Bulk export error: '+(err&&err.message||err||'Network or parse failure'));
+      });
+    }
+
+    function sendAnnouncements(){
+      var pending=(roster||[]).filter(function(f){return !f.announcedAt}).length;
+      if(pending===0){alert('All faculty have already been announced.');return;}
+      if(!confirm('Send 교번 announcement email to '+pending+' faculty member(s)?\n\nAlready-announced people will be skipped. Faculty with multiple emails will receive the announcement at all addresses.')) return;
+      var token=sessionStorage.getItem('portal_token');
+      setSending(true);
+      callApi('announceEmployeeIds',{token:token}).then(function(res){
+        setSending(false);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message||'Send failed.');return;}
+        var sent=(res.sent||[]).length, failed=(res.failed||[]);
+        var msg='Sent: '+sent+' faculty member(s).';
+        if(failed.length>0) msg+='\nFailed: '+failed.length+'\n  '+failed.map(function(f){return f.employeeId+' ('+f.name+')'}).join('\n  ');
+        alert(msg);
+        loadRoster();
+      }).catch(function(){
+        setSending(false);alert('Network error.');
+      });
+    }
+
+    function toggleSettings(){
+      if(settingsOpen){setSettingsOpen(false);return;}
+      setSettingsOpen(true);
+      if(salarySettings) return;
+      setSsLoading(true);
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminGetSalarySettings',{token:token}).then(function(res){
+        setSsLoading(false);
+        if(res.expired){handleLogout();return;}
+        if(res.success) setSalarySettings(res.settings);
+      }).catch(function(){setSsLoading(false);});
+    }
+
+    function saveSettings(){
+      if(!salarySettings) return;
+      setSsSaving(true);
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminUpdateSalarySettings',{token:token,settings:salarySettings}).then(function(res){
+        setSsSaving(false);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message||'Save failed.');return;}
+      }).catch(function(){setSsSaving(false);alert('Network error.');});
+    }
+
+    function ssField(label,key,placeholder){
+      return h('div',{style:{marginBottom:10}},
+        h('label',{style:{fontSize:11,fontWeight:600,color:T.sub,display:'block',marginBottom:4}},label),
+        h('input',{type:'text',value:(salarySettings&&salarySettings[key])||'',placeholder:placeholder||'',onChange:function(e){setSalarySettings(function(prev){var n=Object.assign({},prev);n[key]=e.target.value;return n;})},style:S(inputStyle(),{fontSize:12,padding:'6px 10px'})})
+      );
+    }
+
+    // ── Notices ──
+    function loadNotices(){
+      setNoticesLoading(true);
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminListNotices',{token:token}).then(function(res){
+        setNoticesLoading(false);
+        if(res.expired){handleLogout();return;}
+        if(res.success) setNoticesList(res.notices||[]);
+      }).catch(function(){setNoticesLoading(false);});
+    }
+    function toggleNotices(){
+      if(noticesOpen){setNoticesOpen(false);return;}
+      setNoticesOpen(true);
+      if(!noticesList) loadNotices();
+    }
+    function saveNotice(){
+      if(!editNotice||!editNotice.title) return;
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminSaveNotice',{token:token,rowIndex:editNotice.rowIndex||null,notice:editNotice}).then(function(res){
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message);return;}
+        setEditNotice(null);loadNotices();
+      }).catch(function(){alert('Network error.');});
+    }
+    function deleteNotice(ri){
+      if(!confirm('Delete this notice?')) return;
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminDeleteNotice',{token:token,rowIndex:ri}).then(function(res){
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message);return;}
+        loadNotices();
+      }).catch(function(){alert('Network error.');});
+    }
+
+    // ── Links ──
+    function loadLinks(){
+      setLinksLoading(true);
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminListLinks',{token:token}).then(function(res){
+        setLinksLoading(false);
+        if(res.expired){handleLogout();return;}
+        if(res.success) setLinksList(res.links||[]);
+      }).catch(function(){setLinksLoading(false);});
+    }
+    function toggleLinks(){
+      if(linksOpen){setLinksOpen(false);return;}
+      setLinksOpen(true);
+      if(!linksList) loadLinks();
+    }
+    function saveLink(){
+      if(!editLink||!editLink.title) return;
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminSaveLink',{token:token,rowIndex:editLink.rowIndex||null,link:editLink}).then(function(res){
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message);return;}
+        setEditLink(null);loadLinks();
+      }).catch(function(){alert('Network error.');});
+    }
+    function deleteLink(ri){
+      if(!confirm('Delete this link?')) return;
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminDeleteLink',{token:token,rowIndex:ri}).then(function(res){
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message);return;}
+        loadLinks();
+      }).catch(function(){alert('Network error.');});
+    }
+
+    // ── Events (RSVP) ──
+    var CATEGORY_OPTS=[{code:'OVERSEAS',label:'해외 / Overseas'},{code:'DOMESTIC_FT',label:'국내(전임) / Domestic FT'},{code:'DOMESTIC_EXT',label:'국내(외부) / Domestic Ext'}];
+    function loadEvents(){
+      setEventsLoading(true);
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminListEvents',{token:token}).then(function(res){
+        setEventsLoading(false);
+        if(res.expired){handleLogout();return;}
+        if(res.success) setEventsList(res.events||[]);
+      }).catch(function(){setEventsLoading(false);});
+    }
+    function toggleEvents(){
+      if(eventsOpen){setEventsOpen(false);return;}
+      setEventsOpen(true);
+      if(!eventsList) loadEvents();
+    }
+    function toggleAudience(code){
+      setEditEvent(function(p){
+        var a=(p.audience||[]).slice(); var i=a.indexOf(code);
+        if(i===-1) a.push(code); else a.splice(i,1);
+        return Object.assign({},p,{audience:a});
+      });
+    }
+    function saveEvent(){
+      if(!editEvent||!editEvent.title){alert('Title is required.');return;}
+      var options=(editEvent.optionsText||'').split('\n').map(function(s){return s.trim();}).filter(Boolean);
+      if(options.length===0){alert('Add at least one response option (one per line).');return;}
+      var payload={title:editEvent.title,datetime:editEvent.datetime||'',location:editEvent.location||'',description:editEvent.description||'',deadline:editEvent.deadline||'',audience:editEvent.audience||[],options:options,extraLabel:(editEvent.extraLabel||'').trim(),extraRequired:!!editEvent.extraRequired&&!!(editEvent.extraLabel||'').trim()};
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminSaveEvent',{token:token,rowIndex:editEvent.rowIndex||null,event:payload}).then(function(res){
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message);return;}
+        setEditEvent(null);loadEvents();
+      }).catch(function(){alert('Network error.');});
+    }
+    function deleteEvent(ev){
+      if(!confirm('Delete "'+ev.title+'"?\n\nThe event is removed, but its response tab (with '+ev.responseCount+' response(s)) is kept in the spreadsheet.')) return;
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminDeleteEvent',{token:token,rowIndex:ev.rowIndex}).then(function(res){
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message);return;}
+        loadEvents();
+      }).catch(function(){alert('Network error.');});
+    }
+
+    function openSalaryDetail(eid){
+      if(selEid===eid){setSelEid(null);setSalaryDetail(null);return;}
+      setSelEid(eid);setSalaryDetail(null);setSdLoading(true);
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminGetSalaryDetail',{token:token,employeeId:eid}).then(function(res){
+        setSdLoading(false);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){setSalaryDetail({remitPurpose:'',currency:'',amount:'',notes:'',relationship:'',contactPhone:'',localCurrency:''});return;}
+        setSalaryDetail(res.detail);
+      }).catch(function(){setSdLoading(false);});
+    }
+
+    function saveSalaryDetail(){
+      if(!selEid||!salaryDetail) return;
+      setSdSaving(true);
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminUpdateSalaryAdmin',{token:token,employeeId:selEid,updates:salaryDetail}).then(function(res){
+        setSdSaving(false);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message||'Save failed.');return;}
+        loadRoster();
+      }).catch(function(){setSdSaving(false);alert('Network error.');});
+    }
+
+    function sdField(label,key,placeholder){
+      return h('div',{style:{flex:'1 1 140px',minWidth:0}},
+        h('label',{style:{fontSize:11,fontWeight:600,color:T.sub,display:'block',marginBottom:4}},label),
+        h('input',{type:'text',value:(salaryDetail&&salaryDetail[key])||'',placeholder:placeholder||'',onChange:function(e){setSalaryDetail(function(prev){var n=Object.assign({},prev);n[key]=e.target.value;return n;})},style:S(inputStyle(),{fontSize:12,padding:'6px 10px'})})
+      );
+    }
+
+    function announceOne(eid){
+      if(!confirm('Send 교번 announcement to this faculty member?')) return;
+      var token=sessionStorage.getItem('portal_token');
+      setAnnouncing(eid);
+      callApi('announceEmployeeIds',{token:token,employeeId:eid}).then(function(res){
+        setAnnouncing(null);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message||'Send failed.');return;}
+        var failed=(res.failed||[]);
+        if(failed.length>0) alert('Failed: '+failed[0].error);
+        loadRoster();
+      }).catch(function(){setAnnouncing(null);alert('Network error.');});
+    }
+
+    var pendingCount=(roster||[]).filter(function(f){return !f.announcedAt}).length;
+    var th={textAlign:'left',padding:'10px 12px',fontSize:11,fontWeight:700,color:T.sub,textTransform:'uppercase',letterSpacing:.5,borderBottom:'2px solid '+T.bdr,whiteSpace:'nowrap'};
+    var td={padding:'10px 12px',fontSize:13,color:T.text,borderBottom:'1px solid '+T.bdr,verticalAlign:'middle'};
+
+    var readyCount=(roster||[]).filter(function(f){return f.salaryStatus==='ready'}).length;
+    var submittedCount=(roster||[]).filter(function(f){return f.salaryStatus==='submitted'}).length;
+    var noneCount=(roster||[]).filter(function(f){return f.salaryStatus==='none'}).length;
+    var totalCount=(roster||[]).length;
+    var bulkBusy = exporting==='BULK';
+
+    return h('div',{style:{display:'flex',flexDirection:'column',gap:16}},
+      roster&&roster.length>0&&h('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}},
+        [{l:'Total',v:totalCount,c:T.navy},{l:'Not Submitted',v:noneCount,c:noneCount>0?T.red:T.sub},{l:'Submitted',v:submittedCount,c:submittedCount>0?T.amber:T.sub},{l:'Ready to Export',v:readyCount,c:readyCount>0?T.green:T.sub}].map(function(s,i){
+          return h(Card,{key:i,style:{textAlign:'center',padding:'14px 8px'}},
+            h('div',{style:{fontSize:22,fontWeight:700,color:s.c}},s.v),
+            h('div',{style:{fontSize:11,color:T.sub,marginTop:2}},s.l));
+        })
+      ),
+      h(Card,{style:{padding:0,overflow:'hidden'}},
+        h('div',{onClick:toggleSettings,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 16px',cursor:'pointer',background:settingsOpen?'#f8f9fb':'#fff'}},
+          h('span',{style:{fontSize:14,fontWeight:700,color:T.navy}},'⚙ Salary Settings'),
+          h('span',{style:{fontSize:14,color:T.sub,transform:settingsOpen?'rotate(180deg)':'none',transition:'transform .2s'}},'▾')
+        ),
+        settingsOpen&&h('div',{style:{padding:'0 16px 16px'}},
+          ssLoading?h('p',{style:{fontSize:12,color:T.sub,margin:'8px 0 0'}},'Loading…')
+          :salarySettings?h('div',null,
+            h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'10px 12px',margin:'8px 0 6px',background:(salarySettings.salary_open==='N')?'#fef2f2':T.greenL,borderRadius:8}},
+              h('div',null,
+                h('div',{style:{fontSize:13,fontWeight:700,color:(salarySettings.salary_open==='N')?T.red:T.green}},(salarySettings.salary_open==='N')?'Salary form: HIDDEN from faculty':'Salary form: VISIBLE to faculty'),
+                h('div',{style:{fontSize:11,color:T.sub,marginTop:2}},'교원 Salary 탭 노출 여부. 변경 후 Save Settings를 눌러야 적용됩니다.')),
+              h('select',{value:salarySettings.salary_open==='N'?'N':'Y',onChange:function(e){var v=e.target.value;setSalarySettings(function(prev){var n=Object.assign({},prev);n.salary_open=v;return n;})},style:S(inputStyle(),{flex:'0 0 110px',width:'auto',fontSize:13,padding:'6px 8px'})},
+                h('option',{value:'Y'},'Open'),h('option',{value:'N'},'Closed'))
+            ),
+            h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:'0 16px',marginTop:8}},
+              ssField('Deadline','salary_deadline','e.g., 2026-06-12'),
+              ssField('Year Label','salary_year_label','e.g., 2026-2027 WAY'),
+              ssField('Contact Email','salary_contact_email','e.g., isummer@yonsei.ac.kr')
+            ),
+            ssField('4-Week Payment Info','salary_payment_4w',''),
+            ssField('6-Week Payment Info','salary_payment_6w',''),
+            h('div',{style:{marginTop:14,paddingTop:12,borderTop:'1px solid '+T.bdr}},
+              h('div',{style:{fontSize:13,fontWeight:700,color:T.navy,marginBottom:6}},'Syllabus Edit'),
+              h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'10px 12px',marginBottom:6,background:(salarySettings.syllabus_edit_open==='Y')?T.greenL:'#f8f9fb',borderRadius:8}},
+                h('div',null,
+                  h('div',{style:{fontSize:13,fontWeight:700,color:(salarySettings.syllabus_edit_open==='Y')?T.green:T.sub}},(salarySettings.syllabus_edit_open==='Y')?'Faculty CAN edit their syllabus':'Faculty CANNOT edit their syllabus'),
+                  h('div',{style:{fontSize:11,color:T.sub,marginTop:2}},'My Courses의 Edit Syllabus 버튼. 마감일이 지나면 열려 있어도 자동으로 숨겨집니다.')),
+                h('select',{value:salarySettings.syllabus_edit_open==='Y'?'Y':'N',onChange:function(e){var v=e.target.value;setSalarySettings(function(prev){var n=Object.assign({},prev);n.syllabus_edit_open=v;return n;})},style:S(inputStyle(),{flex:'0 0 110px',width:'auto',fontSize:13,padding:'6px 8px'})},
+                  h('option',{value:'Y'},'Open'),h('option',{value:'N'},'Closed'))
+              ),
+              ssField('Edit Deadline','syllabus_edit_deadline','e.g., 2026-12-15 (비우면 마감 없음)')),
+            h('div',{style:{display:'flex',justifyContent:'flex-end',marginTop:4}},
+              h('button',{onClick:saveSettings,disabled:ssSaving,style:{padding:'6px 16px',background:T.navy,color:'#fff',border:'none',borderRadius:6,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:ssSaving?'wait':'pointer',opacity:ssSaving?0.7:1}},ssSaving?'Saving…':'Save Settings'))
+          ):null
+        )
+      ),
+      // ── Notices Management ──
+      h(Card,{style:{padding:0,overflow:'hidden'}},
+        h('div',{onClick:toggleNotices,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 16px',cursor:'pointer',background:noticesOpen?'#f8f9fb':'#fff'}},
+          h('span',{style:{fontSize:14,fontWeight:700,color:T.navy}},'📢 Notices'),
+          h('span',{style:{fontSize:14,color:T.sub,transform:noticesOpen?'rotate(180deg)':'none',transition:'transform .2s'}},'▾')
+        ),
+        noticesOpen&&h('div',{style:{padding:'0 16px 16px'}},
+          noticesLoading?h('p',{style:{fontSize:12,color:T.sub,margin:'8px 0 0'}},'Loading…')
+          :noticesList?h('div',{style:{marginTop:8}},
+            editNotice?h('div',{style:{display:'flex',flexDirection:'column',gap:8,padding:'12px',background:'#f8f9fb',borderRadius:8,marginBottom:10}},
+              h('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
+                h('input',{type:'text',value:editNotice.title||'',placeholder:'Title *',onChange:function(e){setEditNotice(function(p){return Object.assign({},p,{title:e.target.value})})},style:S(inputStyle(),{flex:'2 1 200px',fontSize:12,padding:'6px 10px'})}),
+                h('input',{type:'date',value:editNotice.date||'',onChange:function(e){setEditNotice(function(p){return Object.assign({},p,{date:e.target.value})})},style:S(inputStyle(),{flex:'0 0 140px',fontSize:12,padding:'6px 10px'})}),
+                h('select',{value:editNotice.priority||'low',onChange:function(e){setEditNotice(function(p){return Object.assign({},p,{priority:e.target.value})})},style:S(inputStyle(),{flex:'0 0 80px',fontSize:12,padding:'6px 8px'})},
+                  h('option',{value:'low'},'Low'),h('option',{value:'high'},'High'))
+              ),
+              h('textarea',{value:editNotice.content||'',placeholder:'Content',rows:3,onChange:function(e){setEditNotice(function(p){return Object.assign({},p,{content:e.target.value})})},style:S(inputStyle(),{fontSize:12,padding:'6px 10px',resize:'vertical'})}),
+              h('div',{style:{display:'flex',gap:6,justifyContent:'flex-end'}},
+                h('button',{onClick:function(){setEditNotice(null)},style:{padding:'5px 12px',background:'#e5e7eb',color:T.text,border:'none',borderRadius:6,fontSize:12,fontFamily:'inherit',cursor:'pointer'}},'Cancel'),
+                h('button',{onClick:saveNotice,style:{padding:'5px 12px',background:T.navy,color:'#fff',border:'none',borderRadius:6,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:'pointer'}},editNotice.rowIndex?'Update':'Add'))
+            ):null,
+            h('div',{style:{display:'flex',justifyContent:'flex-end',marginBottom:8}},
+              !editNotice&&h('button',{onClick:function(){setEditNotice({title:'',date:new Date().toISOString().slice(0,10),priority:'low',content:''})},style:{padding:'5px 12px',background:T.navy,color:'#fff',border:'none',borderRadius:6,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}},'+  Add Notice')
+            ),
+            (noticesList||[]).map(function(n){
+              return h('div',{key:n.rowIndex,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',borderBottom:'1px solid '+T.bdr,fontSize:13}},
+                n.priority==='high'&&h('span',{style:{padding:'2px 6px',borderRadius:8,fontSize:10,fontWeight:600,background:'#fef2f2',color:T.red}},'High'),
+                h('span',{style:{flex:1,fontWeight:500,color:T.text}},n.title),
+                h('span',{style:{fontSize:11,color:T.sub,whiteSpace:'nowrap'}},n.date),
+                h('button',{onClick:function(){setEditNotice(Object.assign({},n))},style:{background:'none',border:'none',color:T.navy,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}},'Edit'),
+                h('button',{onClick:function(){deleteNotice(n.rowIndex)},style:{background:'none',border:'none',color:T.red,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}},'Delete')
+              );
+            })
+          ):null
+        )
+      ),
+      // ── Portal Links Management ──
+      h(Card,{style:{padding:0,overflow:'hidden'}},
+        h('div',{onClick:toggleLinks,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 16px',cursor:'pointer',background:linksOpen?'#f8f9fb':'#fff'}},
+          h('span',{style:{fontSize:14,fontWeight:700,color:T.navy}},'🔗 Useful Links'),
+          h('span',{style:{fontSize:14,color:T.sub,transform:linksOpen?'rotate(180deg)':'none',transition:'transform .2s'}},'▾')
+        ),
+        linksOpen&&h('div',{style:{padding:'0 16px 16px'}},
+          linksLoading?h('p',{style:{fontSize:12,color:T.sub,margin:'8px 0 0'}},'Loading…')
+          :linksList?h('div',{style:{marginTop:8}},
+            editLink?h('div',{style:{display:'flex',flexDirection:'column',gap:8,padding:'12px',background:'#f8f9fb',borderRadius:8,marginBottom:10}},
+              h('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
+                h('input',{type:'text',value:editLink.key||'',placeholder:'Key (e.g., handbook)',onChange:function(e){setEditLink(function(p){return Object.assign({},p,{key:e.target.value})})},style:S(inputStyle(),{flex:'1 1 120px',fontSize:12,padding:'6px 10px'})}),
+                h('input',{type:'text',value:editLink.title||'',placeholder:'Title *',onChange:function(e){setEditLink(function(p){return Object.assign({},p,{title:e.target.value})})},style:S(inputStyle(),{flex:'2 1 200px',fontSize:12,padding:'6px 10px'})})
+              ),
+              h('input',{type:'text',value:editLink.url||'',placeholder:'URL (https://...)',onChange:function(e){setEditLink(function(p){return Object.assign({},p,{url:e.target.value})})},style:S(inputStyle(),{fontSize:12,padding:'6px 10px'})}),
+              h('div',{style:{display:'flex',gap:6,justifyContent:'flex-end'}},
+                h('button',{onClick:function(){setEditLink(null)},style:{padding:'5px 12px',background:'#e5e7eb',color:T.text,border:'none',borderRadius:6,fontSize:12,fontFamily:'inherit',cursor:'pointer'}},'Cancel'),
+                h('button',{onClick:saveLink,style:{padding:'5px 12px',background:T.navy,color:'#fff',border:'none',borderRadius:6,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:'pointer'}},editLink.rowIndex?'Update':'Add'))
+            ):null,
+            h('div',{style:{display:'flex',justifyContent:'flex-end',marginBottom:8}},
+              !editLink&&h('button',{onClick:function(){setEditLink({key:'',title:'',url:''})},style:{padding:'5px 12px',background:T.navy,color:'#fff',border:'none',borderRadius:6,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}},'+  Add Link')
+            ),
+            (linksList||[]).map(function(lk){
+              return h('div',{key:lk.rowIndex,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',borderBottom:'1px solid '+T.bdr,fontSize:13}},
+                h('span',{style:{fontSize:11,color:T.sub,fontFamily:'monospace',minWidth:60}},lk.key||'—'),
+                h('span',{style:{flex:1,fontWeight:500,color:T.text}},lk.title),
+                lk.url&&h('a',{href:lk.url,target:'_blank',rel:'noopener',onClick:function(e){e.stopPropagation()},style:{fontSize:11,color:T.navy,whiteSpace:'nowrap'}},'Open ↗'),
+                h('button',{onClick:function(){setEditLink(Object.assign({},lk))},style:{background:'none',border:'none',color:T.navy,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}},'Edit'),
+                h('button',{onClick:function(){deleteLink(lk.rowIndex)},style:{background:'none',border:'none',color:T.red,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}},'Delete')
+              );
+            })
+          ):null
+        )
+      ),
+      // ── Events (RSVP) Management ──
+      h(Card,{style:{padding:0,overflow:'hidden'}},
+        h('div',{onClick:toggleEvents,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 16px',cursor:'pointer',background:eventsOpen?'#f8f9fb':'#fff'}},
+          h('span',{style:{fontSize:14,fontWeight:700,color:T.navy}},'📅 Events (RSVP)'),
+          h('span',{style:{fontSize:14,color:T.sub,transform:eventsOpen?'rotate(180deg)':'none',transition:'transform .2s'}},'▾')
+        ),
+        eventsOpen&&h('div',{style:{padding:'0 16px 16px'}},
+          eventsLoading?h('p',{style:{fontSize:12,color:T.sub,margin:'8px 0 0'}},'Loading…')
+          :eventsList?h('div',{style:{marginTop:8}},
+            editEvent?h('div',{style:{display:'flex',flexDirection:'column',gap:8,padding:'12px',background:'#f8f9fb',borderRadius:8,marginBottom:10}},
+              h('input',{type:'text',value:editEvent.title||'',placeholder:'Title * (행사명)',onChange:function(e){setEditEvent(function(p){return Object.assign({},p,{title:e.target.value})})},style:S(inputStyle(),{fontSize:12,padding:'6px 10px'})}),
+              h('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
+                h('input',{type:'text',value:editEvent.datetime||'',placeholder:'Date & time (e.g., 2026-07-01 18:00)',onChange:function(e){setEditEvent(function(p){return Object.assign({},p,{datetime:e.target.value})})},style:S(inputStyle(),{flex:'2 1 200px',fontSize:12,padding:'6px 10px'})}),
+                h('input',{type:'text',value:editEvent.location||'',placeholder:'Location (장소)',onChange:function(e){setEditEvent(function(p){return Object.assign({},p,{location:e.target.value})})},style:S(inputStyle(),{flex:'1 1 140px',fontSize:12,padding:'6px 10px'})})
+              ),
+              h('div',null,
+                h('label',{style:{fontSize:11,fontWeight:600,color:T.sub,display:'block',marginBottom:4}},'RSVP deadline (마감일)'),
+                h('input',{type:'date',value:editEvent.deadline||'',onChange:function(e){setEditEvent(function(p){return Object.assign({},p,{deadline:e.target.value})})},style:S(inputStyle(),{flex:'0 0 140px',fontSize:12,padding:'6px 10px'})})
+              ),
+              h('textarea',{value:editEvent.description||'',placeholder:'Description (설명)',rows:2,onChange:function(e){setEditEvent(function(p){return Object.assign({},p,{description:e.target.value})})},style:S(inputStyle(),{fontSize:12,padding:'6px 10px',resize:'vertical'})}),
+              h('div',null,
+                h('label',{style:{fontSize:11,fontWeight:600,color:T.sub,display:'block',marginBottom:4}},'Audience — who can see this (대상 분류)'),
+                h('div',{style:{display:'flex',flexWrap:'wrap',gap:'4px 14px'}},
+                  CATEGORY_OPTS.map(function(c){
+                    return h('label',{key:c.code,style:{display:'inline-flex',alignItems:'center',gap:5,fontSize:12,color:T.text,cursor:'pointer'}},
+                      h('input',{type:'checkbox',checked:(editEvent.audience||[]).indexOf(c.code)!==-1,onChange:function(){toggleAudience(c.code)}}),c.label);
+                  })
+                ),
+                h('p',{style:{fontSize:10,color:T.sub,margin:'4px 0 0'}},'None checked = visible to everyone.')
+              ),
+              h('div',null,
+                h('label',{style:{fontSize:11,fontWeight:600,color:T.sub,display:'block',marginBottom:4}},'Response options — one per line (응답 선택지, 한 줄에 하나)'),
+                h('textarea',{value:editEvent.optionsText||'',placeholder:'Attending\nNot attending',rows:4,onChange:function(e){setEditEvent(function(p){return Object.assign({},p,{optionsText:e.target.value})})},style:S(inputStyle(),{fontSize:12,padding:'6px 10px',resize:'vertical',fontFamily:'monospace'})})
+              ),
+              h('div',null,
+                h('label',{style:{fontSize:11,fontWeight:600,color:T.sub,display:'block',marginBottom:4}},'Extra free-text question — optional (추가 자유입력 질문, 비우면 없음)'),
+                h('input',{type:'text',value:editEvent.extraLabel||'',placeholder:'e.g., Dietary restrictions / allergies (식이 제한·알레르기)',onChange:function(e){setEditEvent(function(p){return Object.assign({},p,{extraLabel:e.target.value})})},style:S(inputStyle(),{fontSize:12,padding:'6px 10px'})}),
+                h('label',{style:{display:'inline-flex',alignItems:'center',gap:5,fontSize:12,color:(editEvent.extraLabel||'').trim()?T.text:T.sub,cursor:(editEvent.extraLabel||'').trim()?'pointer':'not-allowed',marginTop:6}},
+                  h('input',{type:'checkbox',checked:!!editEvent.extraRequired,disabled:!(editEvent.extraLabel||'').trim(),onChange:function(e){var c=e.target.checked;setEditEvent(function(p){return Object.assign({},p,{extraRequired:c})})}}),'Required (필수 응답)')
+              ),
+              h('div',{style:{display:'flex',gap:6,justifyContent:'flex-end'}},
+                h('button',{onClick:function(){setEditEvent(null)},style:{padding:'5px 12px',background:'#e5e7eb',color:T.text,border:'none',borderRadius:6,fontSize:12,fontFamily:'inherit',cursor:'pointer'}},'Cancel'),
+                h('button',{onClick:saveEvent,style:{padding:'5px 12px',background:T.navy,color:'#fff',border:'none',borderRadius:6,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:'pointer'}},editEvent.rowIndex?'Update':'Add'))
+            ):null,
+            h('div',{style:{display:'flex',justifyContent:'flex-end',marginBottom:8}},
+              !editEvent&&h('button',{onClick:function(){setEditEvent({title:'',datetime:'',location:'',description:'',deadline:'',audience:['OVERSEAS','DOMESTIC_FT','DOMESTIC_EXT'],optionsText:'',extraLabel:'',extraRequired:false})},style:{padding:'5px 12px',background:T.navy,color:'#fff',border:'none',borderRadius:6,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:'pointer',display:'inline-flex',alignItems:'center',gap:4}},'+  Add Event')
+            ),
+            (eventsList||[]).length===0?h('p',{style:{fontSize:12,color:T.sub,textAlign:'center',padding:'8px 0'}},'No events yet.')
+            :(eventsList||[]).map(function(ev){
+              return h('div',{key:ev.rowIndex,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',borderBottom:'1px solid '+T.bdr,fontSize:13}},
+                h('div',{style:{flex:1,minWidth:0}},
+                  h('div',{style:{fontWeight:600,color:T.text}},ev.title),
+                  h('div',{style:{fontSize:11,color:T.sub,marginTop:2}},(ev.datetime||'—')+(ev.deadline?(' · RSVP by '+ev.deadline):''))
+                ),
+                ev.responseUrl
+                  ? h('a',{href:ev.responseUrl,target:'_blank',rel:'noopener',onClick:function(e){e.stopPropagation()},style:{fontSize:11,fontWeight:600,color:ev.responseCount>0?T.green:T.sub,whiteSpace:'nowrap',textDecoration:'none'},title:'Open responses in the spreadsheet'},ev.responseCount+' resp. ↗')
+                  : h('span',{style:{fontSize:11,fontWeight:600,color:T.sub,whiteSpace:'nowrap'}},ev.responseCount+' resp.'),
+                h('button',{onClick:function(){setEditEvent(Object.assign({},ev,{optionsText:(ev.options||[]).join('\n')}))},style:{background:'none',border:'none',color:T.navy,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}},'Edit'),
+                h('button',{onClick:function(){deleteEvent(ev)},style:{background:'none',border:'none',color:T.red,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}},'Delete')
+              );
+            })
+          ):null
+        )
+      ),
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:12}},
+        h('h2',{style:{fontSize:20,fontWeight:700,color:T.navy,margin:0,fontFamily:"'Playfair Display',serif"}},'Faculty Management'),
+        h('div',{style:{display:'flex',gap:8,flexWrap:'wrap'}},
+          h('button',{onClick:exportRemittanceBulk,disabled:bulkBusy||loadingAdmin||readyCount===0,style:{padding:'10px 16px',background:readyCount===0?'#9ca3af':T.navy,color:'#fff',border:'none',borderRadius:10,fontSize:13,fontWeight:600,fontFamily:'inherit',display:'inline-flex',alignItems:'center',gap:6,cursor:(bulkBusy||readyCount===0)?'not-allowed':'pointer',opacity:bulkBusy?0.6:1}},
+            Icons.download(),' ',bulkBusy?'Exporting…':('Export Remittance Forms'+(readyCount>0?(' ('+readyCount+')'):''))
+          ),
+          h('button',{onClick:sendAnnouncements,disabled:sending||loadingAdmin||pendingCount===0,style:{padding:'10px 16px',background:pendingCount===0?'#9ca3af':T.navy,color:'#fff',border:'none',borderRadius:10,fontSize:13,fontWeight:600,fontFamily:'inherit',display:'inline-flex',alignItems:'center',gap:6,cursor:(sending||pendingCount===0)?'not-allowed':'pointer',opacity:sending?0.6:1}},
+            Icons.send(),' ',sending?'Sending…':('Send 교번 announcements'+(pendingCount>0?(' ('+pendingCount+')'):''))
+          )
+        )
+      ),
+      adminError&&h('p',{style:{fontSize:13,color:T.red,margin:0,padding:'8px 12px',background:'#fef2f2',borderRadius:8}},adminError),
+      exportReport && h(Card,null,
+        h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}},
+          h('h3',{style:{fontSize:14,fontWeight:700,color:T.navy,margin:0}},'Bulk export result'),
+          h('button',{onClick:function(){setExportReport(null)},style:{background:'none',border:'none',color:T.sub,fontSize:18,cursor:'pointer',padding:'0 4px'}},'×')),
+        h('p',{style:{fontSize:13,color:T.text,margin:'0 0 8px'}},
+          h('strong',null,'Exported: '),exportReport.exported.length,' file(s).',
+          exportReport.folderUrl ? [' ',h('a',{key:'a',href:exportReport.folderUrl,target:'_blank',rel:'noopener noreferrer',style:{color:T.navy,fontWeight:600}},'Open output folder →')] : null),
+        exportReport.skipped.length>0 && h('div',{style:{marginTop:6}},
+          h('p',{style:{fontSize:13,color:T.amber,margin:'0 0 4px'}},h('strong',null,'Skipped: '),exportReport.skipped.length,' (missing Currency / Amount or no submission).'),
+          h('div',{style:{maxHeight:160,overflowY:'auto',background:'#f8f9fb',padding:'8px 10px',borderRadius:6,fontSize:12,fontFamily:'monospace',color:T.sub}},
+            exportReport.skipped.map(function(s,i){return h('div',{key:i,style:{padding:'2px 0'}},s.employeeId+' — '+s.reason);})))
+      ),
+      loadingAdmin?
+        h(Card,null,h('p',{style:{fontSize:13,color:T.sub,margin:0,textAlign:'center'}},'Loading roster…'))
+      :(roster&&roster.length===0)?
+        h(Card,null,h('p',{style:{fontSize:13,color:T.sub,margin:0,textAlign:'center'}},'No faculty rows found.'))
+      :h(Card,{style:{padding:0,overflow:'hidden'}},
+        h('div',{style:{overflowX:'auto',WebkitOverflowScrolling:'touch'}},
+          h('table',{style:{borderCollapse:'collapse',width:'100%',minWidth:1040}},
+            h('thead',null,
+              h('tr',null,
+                h('th',{style:th},'Name / EID'),
+                h('th',{style:th},'Emails'),
+                h('th',{style:th},'DOB'),
+                h('th',{style:th},'Salary'),
+                h('th',{style:th},'Announced')
+              )
+            ),
+            h('tbody',null,
+              (roster||[]).map(function(f){
+                var isSelected = selEid===f.employeeId;
+                return [h('tr',{key:f.employeeId,onClick:function(){if(f.salaryStatus!=='none')openSalaryDetail(f.employeeId);},style:{cursor:f.salaryStatus!=='none'?'pointer':'default',background:isSelected?'rgba(0,55,100,.04)':'transparent'}},
+                  h('td',{style:td},
+                    h('div',{style:{fontWeight:600}},f.name||'—'),
+                    h('div',{style:{fontSize:11,color:T.sub,marginTop:2,fontFamily:'monospace'}},f.employeeId)
+                  ),
+                  h('td',{style:S(td,{fontSize:12,color:T.sub})},
+                    (f.emails||[]).map(function(em,i){return h('div',{key:i},em);})
+                  ),
+                  h('td',{style:td,onClick:function(e){e.stopPropagation();}},
+                    h('input',{type:'date',value:f.dob||'',onChange:function(e){
+                      var v=e.target.value;
+                      if(v && v!==f.dob) updateFaculty(f.employeeId,{dob:v});
+                    },style:{padding:'4px 6px',border:'1px solid '+T.bdr,borderRadius:6,fontSize:12,fontFamily:'inherit'}})
+                  ),
+                  h('td',{style:td},(function(){
+                    var st = f.salaryStatus||'none';
+                    if(st==='ready'){
+                      var busy = exporting===f.employeeId;
+                      return h('button',{onClick:function(){exportRemittance(f.employeeId)},disabled:busy||bulkBusy,style:{padding:'4px 10px',borderRadius:14,fontSize:12,fontWeight:600,fontFamily:'inherit',background:T.greenL,color:T.green,border:'none',cursor:busy?'wait':'pointer',whiteSpace:'nowrap',opacity:busy?0.6:1},title:'Generate and download remittance xlsx'},busy?'Exporting…':'Export ↓');
+                    }
+                    if(st==='submitted'){
+                      return h('span',{style:{padding:'4px 10px',borderRadius:14,fontSize:11,fontWeight:600,background:T.amberL,color:T.amber,whiteSpace:'nowrap'},title:'Form submitted — click row to fill Currency + Amount'},'Need $/CCY');
+                    }
+                    return h('span',{style:{padding:'4px 10px',borderRadius:14,fontSize:11,fontWeight:600,background:'#f0f2f5',color:T.sub,whiteSpace:'nowrap'},title:'Faculty has not submitted the salary form yet'},'—');
+                  })()),
+                  h('td',{style:S(td,{fontSize:12,color:T.sub,whiteSpace:'nowrap'})},
+                    f.announcedAt
+                      ? [h('span',{key:'c',style:{color:T.green,marginRight:4}},Icons.check()),f.announcedAt]
+                      : h('button',{onClick:function(e){e.stopPropagation();announceOne(f.employeeId);},disabled:announcing===f.employeeId||sending,style:{padding:'3px 10px',borderRadius:12,fontSize:11,fontWeight:600,fontFamily:'inherit',background:'rgba(0,55,100,.06)',color:T.navy,border:'none',cursor:(announcing===f.employeeId)?'wait':'pointer',opacity:(announcing===f.employeeId)?0.6:1}},announcing===f.employeeId?'Sending…':'Send')
+                  )
+                ),
+                isSelected&&h('tr',{key:f.employeeId+'_detail'},
+                  h('td',{colSpan:5,style:{padding:'12px 16px',background:'#f8f9fb',borderBottom:'2px solid '+T.navy}},
+                    sdLoading?h('p',{style:{fontSize:12,color:T.sub,margin:0}},'Loading…')
+                    :salaryDetail?h('div',{style:{display:'flex',flexDirection:'column',gap:10}},
+                      h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:2}},
+                        h('span',{style:{fontSize:13,fontWeight:700,color:T.navy}},'Salary Admin Fields — '+f.name),
+                        h('div',{style:{display:'flex',gap:6}},
+                          h('button',{onClick:function(e){e.stopPropagation();saveSalaryDetail();},disabled:sdSaving,style:{padding:'5px 14px',background:T.navy,color:'#fff',border:'none',borderRadius:6,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:sdSaving?'wait':'pointer',opacity:sdSaving?0.7:1}},sdSaving?'Saving…':'Save'),
+                          h('button',{onClick:function(e){e.stopPropagation();setSelEid(null);setSalaryDetail(null);},style:{padding:'5px 14px',background:'#e5e7eb',color:T.text,border:'none',borderRadius:6,fontSize:12,fontWeight:500,fontFamily:'inherit',cursor:'pointer'}},'Close'))
+                      ),
+                      h('div',{style:{display:'flex',flexWrap:'wrap',gap:10}},
+                        sdField('송금 사유 [K43]','remitPurpose','e.g., 2026 국제하계대학 강의료'),
+                        sdField('Currency [K32]','currency','e.g., USD'),
+                        sdField('Amount [AE32]','amount','e.g., 7000'),
+                        sdField('현지 수취통화 [BB32]','localCurrency','e.g., USD')
+                      ),
+                      h('div',{style:{display:'flex',flexWrap:'wrap',gap:10}},
+                        sdField('Relationship [BY45]','relationship','e.g., Self'),
+                        sdField('담당자 번호 [CB14]','contactPhone','e.g., 02-2123-xxxx'),
+                        sdField('Notes [BP61]','notes','')
+                      )
+                    ):null
+                  )
+                )];
+              })
+            )
+          )
+        )
+      ),
+    );
+  }
+
+  function SalaryTab(){
+    var salary = faculty.salary || MOCK.salary;
+    var _initData = Object.assign({},salary.data||{});
+    // 거주/비거주 선택값은 RESIDENCY_STATUS 컬럼에 저장됨. 옛 제출분(컬럼 도입 전)만 기존 은행데이터로 추론(폴백).
+    if(!_initData.residencyStatus && salary.submitted){
+      var _foreignFilled = ['branchName','bankAddress','abaNo','swiftCode','country','bankTownLocation','bankTownName'].some(function(k){
+        var v=String(_initData[k]||'').trim(); return v && v.toUpperCase()!=='N/A';
+      });
+      _initData.residencyStatus = _foreignFilled ? 'nonResident' : 'resident';
+    }
+    var _f = useState(_initData), form = _f[0], setForm = _f[1];
+    var _st = useState({submitted:!!salary.submitted,submittedAt:salary.submittedAt||'',updatedAt:salary.updatedAt||''}), status = _st[0], setStatus = _st[1];
+    var _sv = useState(false), saving = _sv[0], setSaving = _sv[1];
+    var _err = useState(''), formError = _err[0], setFormError = _err[1];
+    var _ok = useState(false), justSaved = _ok[0], setJustSaved = _ok[1];
+    // 항공료 증빙 업로드 (FlightReimb=Y 대상만 카드 표시)
+    var flight = faculty.flight || MOCK.flight;
+    var _ff = useState(flight.files||[]), flightFiles = _ff[0], setFlightFiles = _ff[1];
+    var _fb = useState(false), flightBusy = _fb[0], setFlightBusy = _fb[1];
+    var _fm = useState(''), flightMsg = _fm[0], setFlightMsg = _fm[1];
+
+    function update(field, value){
+      if(status.submitted) return;
+      setForm(function(prev){ var n=Object.assign({},prev); n[field]=value; return n; });
+      setJustSaved(false);
+    }
+
+    function submit(){
+      setFormError(''); setJustSaved(false);
+      // 필수필드 검증 — 빈칸이면 제출 차단 (해당 없는 항목은 N/A 입력 안내)
+      var requiredFields = [
+        ['fullName','Full Name (Section 1)'],
+        ['passportOrArc','Passport/ARC No. (Section 1)'],
+        ['nationality','Nationality (Section 1)'],
+        ['telephone','Telephone No. (Section 1)'],
+        ['permanentAddressKorea','Permanent address in Korea (Section 2)'],
+        ['liveOver183Days','Live in Korea over 183 days (Section 2)'],
+        ['jobRequiresStay','Job requires stay over 183 days (Section 2)'],
+        ['familyInKorea','Family members in Korea (Section 2)'],
+        ['koreanBusinessOrRE','Business or real estate in Korea (Section 2)'],
+        ['beneficiaryName','Beneficiary Name (Section 3)'],
+        ['bankName','Bank Name (Section 3)'],
+        ['accountNo','Bank Account No. (Section 3)'],
+        ['branchName','Bank Branch Name (Section 3)'],
+        ['bankAddress','Bank Street Name (Section 3)'],
+        ['bankTownLocation','Bank Town Location (Section 3)'],
+        ['bankTownName','Bank Town Name (Section 3)'],
+        ['country','Bank Country (Section 3)'],
+        ['abaNo','ABA No. (Section 3 — enter N/A if not applicable)'],
+        ['swiftCode','Swift Code (Section 3)'],
+        ['streetAddress','Personal Address (Section 3)'],
+        ['region','Personal Town Location (Section 3)'],
+        ['city','Personal Town Name (Section 3)'],
+        ['mailingCountry','Personal Address Country (Section 3)']
+      ];
+      if(!form.residencyStatus){setFormError('Please select Resident or Non-Resident in Section 2.');return;}
+      var missing = requiredFields.filter(function(f){return !String(form[f[0]]||'').trim()}).map(function(f){return f[1]});
+      if(missing.length){
+        setFormError('Please fill in all required fields (enter N/A if not applicable): '+missing.join(', '));
+        return;
+      }
+      if(!form.attestation){setFormError('Please confirm the attestation in Section 4.');return;}
+      if(!form.consent){setFormError('Please confirm the consent of personal information in Section 4.');return;}
+      setSaving(true);
+      var token = sessionStorage.getItem('portal_token');
+      callApi('saveSalaryDisbursement',{token:token,data:form}).then(function(res){
+        setSaving(false);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){setFormError(res.message||'Save failed.');return;}
+        setStatus({submitted:true,submittedAt:res.submittedAt||status.submittedAt,updatedAt:res.updatedAt||''});
+        setJustSaved(true);
+      }).catch(function(){
+        setSaving(false); setFormError('Network error. Please try again.');
+      });
+    }
+
+    var labelStyle = {display:'block',fontSize:13,fontWeight:600,color:T.text,marginBottom:6,lineHeight:1.45};
+    var krSub = {display:'block',fontSize:12,fontWeight:400,color:T.sub,marginTop:3,lineHeight:1.4};
+    var requiredStar = h('span',{style:{color:T.red}},' *');
+    var formLocked = !!status.submitted;
+
+    function fieldText(opts){
+      var disabled = !!opts.locked || formLocked;
+      return h('div',{style:{marginBottom:14}},
+        h('label',{style:labelStyle},opts.label,opts.required?requiredStar:null,opts.kr&&h('span',{style:krSub},opts.kr)),
+        h('input',{type:'text',value:form[opts.field]||'',onChange:function(e){update(opts.field,e.target.value)},placeholder:opts.placeholder||'',disabled:disabled,style:S(inputStyle(),disabled?{background:'#f0f2f5',color:T.sub,cursor:'not-allowed'}:{})})
+      );
+    }
+
+    function fieldYesNo(opts){
+      var val = form[opts.field] || '';
+      function pill(option){
+        var active = val===option;
+        var disabled = formLocked;
+        return h('label',{key:option,style:{display:'inline-flex',alignItems:'center',gap:6,padding:'6px 16px',border:'1.5px solid '+(active?T.navy:T.bdr),borderRadius:8,fontSize:13,cursor:disabled?'not-allowed':'pointer',background:active?'rgba(0,55,100,.06)':'#fff',color:active?T.navy:T.text,fontWeight:active?600:400,marginRight:8,marginBottom:4,opacity:disabled&&!active?0.6:1}},
+          h('input',{type:'radio',name:opts.field,value:option,checked:active,disabled:disabled,onChange:function(){update(opts.field,option)},style:{margin:0}}),
+          option
+        );
+      }
+      return h('div',{style:{marginBottom:14}},
+        h('label',{style:labelStyle},opts.label,requiredStar,opts.kr&&h('span',{style:krSub},opts.kr)),
+        h('div',null, pill('Yes'), pill('No'))
+      );
+    }
+
+    function fieldCheckbox(opts){
+      return h('label',{style:{display:'flex',alignItems:'flex-start',gap:10,padding:'4px 0',cursor:formLocked?'not-allowed':'pointer'}},
+        h('input',{type:'checkbox',checked:!!form[opts.field],disabled:formLocked,onChange:function(e){update(opts.field,e.target.checked)},style:{marginTop:4}}),
+        h('span',{style:{fontSize:13,lineHeight:1.55,color:T.text,flex:1}},opts.label,opts.required?requiredStar:null,opts.kr&&h('span',{style:{display:'block',fontSize:12,fontWeight:400,color:T.sub,marginTop:3,lineHeight:1.45}},opts.kr))
+      );
+    }
+
+    // 거주자/비거주자 선택 (Section 3 노출 트리거 + RESIDENCY_STATUS 컬럼에 저장).
+    function residencySelector(){
+      var val = form.residencyStatus || '';
+      function opt(value, en, kr){
+        var active = val===value;
+        return h('label',{key:value,style:{display:'flex',alignItems:'flex-start',gap:8,flex:'1 1 220px',padding:'10px 14px',border:'1.5px solid '+(active?T.navy:T.bdr),borderRadius:8,cursor:formLocked?'not-allowed':'pointer',background:active?'rgba(0,55,100,.06)':'#fff',opacity:formLocked&&!active?0.6:1}},
+          h('input',{type:'radio',name:'residencyStatus',value:value,checked:active,disabled:formLocked,onChange:function(){update('residencyStatus',value)},style:{marginTop:3}}),
+          h('span',{style:{lineHeight:1.4}},
+            h('span',{style:{display:'block',fontSize:13,fontWeight:600,color:active?T.navy:T.text}},en),
+            h('span',{style:{display:'block',fontSize:12,color:T.sub,marginTop:2}},kr)));
+      }
+      return h('div',{style:{marginTop:8,padding:'12px 14px',background:'#f8f9fb',borderRadius:8}},
+        h('label',{style:labelStyle},'Based on your answers above, please select your status:',requiredStar,
+          h('span',{style:krSub},'위 답변에 따라 본인의 상태를 선택하세요.')),
+        h('div',{style:{display:'flex',flexWrap:'wrap',gap:8}}, opt('resident','Resident in Korea','한국 거주자'), opt('nonResident','Non-Resident in Korea','한국 비거주자'))
+      );
+    }
+
+    var sectionHead = function(t){return h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:'0 0 16px',paddingBottom:10,borderBottom:'1px solid '+T.bdr}},t)};
+
+    var payments = salary.payments || {courses:[],total:'',hasData:false};
+    var courseLabel = function(i,n){ if(n<=1) return 'Payment Amount'; var ord=['1st','2nd','3rd','4th','5th']; return (ord[i]||((i+1)+'th'))+' Course'; };
+    var paymentCard = payments.hasData && h(Card,null,
+        h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:'0 0 12px'}},'💰 Your Payment Amount (Contract-Based)'),
+        h('div',{style:{display:'flex',flexDirection:'column',gap:8}},
+          payments.courses.map(function(p,i){
+            return h('div',{key:i,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:i<payments.courses.length-1||payments.total?'1px solid '+T.bdr:'none',fontSize:14}},
+              h('span',{style:{color:T.text}},courseLabel(i,payments.courses.length)),
+              h('span',{style:{color:T.text,fontWeight:600,fontFamily:'monospace'}},p.amount||'—'));
+          }),
+          payments.total && h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0 0',fontSize:14}},
+            h('span',{style:{color:T.navy,fontWeight:700}},'Total'),
+            h('span',{style:{color:T.navy,fontWeight:700,fontFamily:'monospace'}},payments.total))
+        ),
+        h('p',{style:{fontSize:11,color:T.sub,fontStyle:'italic',margin:'12px 0 0',lineHeight:1.5}},
+          'The amount above reflects your contract-based course payment only. Your final disbursement may differ, as enrollment-based incentives and other adjustments are applied separately. / 위 금액은 계약 기준 강의료이며, 최종 지급액은 수강인원별 추가지급 등 인센티브가 별도로 반영되어 달라질 수 있습니다.')
+      );
+    // 수강인원별 추가지급 안내 (강의료 관련 — 전임 포함 모든 교원에게 표시).
+    var enrollmentCard = h(Card,null,
+        h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:'0 0 2px'}},'📊 Additional Payment by Course Enrollment'),
+        h('p',{style:{fontSize:12,color:T.sub,margin:'0 0 12px'}},'수강인원별 추가지급'),
+        h('div',{style:{display:'flex',flexDirection:'column',gap:8}},
+          [['40명 이상 ~ 60명 미만','40–60 students','KRW 500,000 추가지급','KRW 500,000 additional payment'],
+           ['60명 이상 ~ 80명 미만','60–80 students','KRW 1,000,000 추가지급 · 수업 전담 조교 지원','KRW 1,000,000 additional payment + dedicated teaching assistant'],
+           ['80명 이상 ~ 100명 미만','80–100 students','KRW 1,500,000 추가지급 · 수업 전담 조교 지원','KRW 1,500,000 additional payment + dedicated teaching assistant'],
+           ['100명 이상','100+ students','KRW 2,000,000 추가지급 · 수업 전담 조교 지원','KRW 2,000,000 additional payment + dedicated teaching assistant']].map(function(r,i){
+            return h('div',{key:i,style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,padding:'8px 0',borderBottom:i<3?'1px solid '+T.bdr:'none',fontSize:13}},
+              h('div',{style:{whiteSpace:'nowrap'}},
+                h('div',{style:{color:T.text,fontWeight:600}},r[1]),
+                h('div',{style:{color:T.sub,fontSize:11,marginTop:1}},r[0])),
+              h('div',{style:{textAlign:'right',lineHeight:1.5}},
+                h('div',{style:{color:T.text}},r[3]),
+                h('div',{style:{color:T.sub,fontSize:11,marginTop:1}},r[2])));
+          })
+        )
+      );
+    // 항공료 증빙 업로드 카드 — FlightReimb=Y 대상만. 추가 업로드만 허용(삭제는 OIA 이메일 요청).
+    function onFlightFiles(e){
+      var list = Array.prototype.slice.call(e.target.files||[]);
+      e.target.value='';
+      if(!list.length) return;
+      var allowed = ['application/pdf','image/jpeg','image/png'];
+      for(var i=0;i<list.length;i++){
+        if(allowed.indexOf(list[i].type)===-1){setFlightMsg('Only PDF, JPG, or PNG files are allowed: '+list[i].name);return;}
+        if(list[i].size>10*1024*1024){setFlightMsg('File exceeds the 10MB limit: '+list[i].name);return;}
+      }
+      setFlightMsg(''); setFlightBusy(true);
+      var token = sessionStorage.getItem('portal_token');
+      var idx = 0;
+      function next(){
+        if(idx>=list.length){setFlightBusy(false);setFlightMsg('');return;}
+        var f = list[idx];
+        setFlightMsg('Uploading '+(idx+1)+' / '+list.length+' — '+f.name);
+        var reader = new FileReader();
+        reader.onload = function(){
+          var b64 = String(reader.result).split(',')[1];
+          callApi('uploadFlightFile',{token:token,file:{name:f.name,mimeType:f.type,data:b64}}).then(function(res){
+            if(res.expired){handleLogout();return;}
+            if(!res.success){setFlightBusy(false);setFlightMsg(res.message||('Upload failed: '+f.name));return;}
+            setFlightFiles(res.files||[]);
+            idx++; next();
+          }).catch(function(){setFlightBusy(false);setFlightMsg('Network error while uploading '+f.name);});
+        };
+        reader.onerror = function(){setFlightBusy(false);setFlightMsg('Could not read file: '+f.name);};
+        reader.readAsDataURL(f);
+      }
+      next();
+    }
+    var flightCard = flight.eligible && h(Card,null,
+        h('h3',{style:{fontSize:15,fontWeight:700,color:T.navy,margin:'0 0 2px'}},'✈️ Flight Reimbursement Documents'),
+        h('p',{style:{fontSize:12,color:T.sub,margin:'0 0 12px'}},'항공료 증빙자료 제출'),
+        h('div',{style:{display:'flex',flexDirection:'column',gap:8,marginBottom:14}},
+          [['U.S. East Coast & Europe','동부 미주 · 유럽','USD 3,000'],
+           ['U.S. West Coast','서부 미주','USD 2,500'],
+           ['East Asia','동아시아','USD 1,000']].map(function(r,i){
+            return h('div',{key:i,style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,padding:'8px 0',borderBottom:i<2?'1px solid '+T.bdr:'none',fontSize:13}},
+              h('div',null,
+                h('div',{style:{color:T.text,fontWeight:600}},r[0]),
+                h('div',{style:{color:T.sub,fontSize:11,marginTop:1}},r[1])),
+              h('div',{style:{color:T.text,fontWeight:600,whiteSpace:'nowrap'}},r[2]));
+          })
+        ),
+        h('div',{style:{marginBottom:12,padding:'10px 12px',background:'#f8f9fb',borderRadius:8,fontSize:12,color:T.sub,lineHeight:1.55}},
+          h('p',{style:{margin:0,color:T.text}},'Please upload proof of your flight expenses (e-ticket receipt, boarding pass, etc.). PDF, JPG, or PNG — up to 10MB per file, multiple files allowed.'),
+          h('p',{style:{margin:'4px 0 0'}},'항공료 증빙자료(전자항공권 영수증, 탑승권 등)를 업로드해 주세요. PDF·JPG·PNG, 파일당 10MB, 여러 파일 가능.'),
+          h('p',{style:{margin:'4px 0 0'}},'To replace a file, upload a new one and email ',h('a',{href:'mailto:'+(salary.contactEmail||'isummer@yonsei.ac.kr'),style:{color:T.navy}},salary.contactEmail||'isummer@yonsei.ac.kr'),' to remove the old file. / 파일 교체가 필요하면 새 파일을 올린 뒤 이메일로 기존 파일 삭제를 요청해 주세요.')),
+        flightFiles.length>0 && h('div',{style:{marginBottom:12}},
+          h('p',{style:{fontSize:12,fontWeight:600,color:T.text,margin:'0 0 6px'}},'Uploaded files ('+flightFiles.length+')'),
+          flightFiles.map(function(f,i){
+            return h('div',{key:i,style:{display:'flex',justifyContent:'space-between',gap:12,padding:'6px 0',borderBottom:i<flightFiles.length-1?'1px solid '+T.bdr:'none',fontSize:12}},
+              h('span',{style:{color:T.text,wordBreak:'break-all'}},'📎 '+f.name),
+              h('span',{style:{color:T.sub,whiteSpace:'nowrap'}},f.uploadedAt));
+          })),
+        flightMsg && h('div',{style:{marginBottom:10,padding:'8px 12px',background:flightBusy?'#f8f9fb':'#fef2f2',color:flightBusy?T.sub:T.red,borderRadius:8,fontSize:12}},flightMsg),
+        h('label',{style:{display:'inline-flex',alignItems:'center',gap:6,padding:'9px 18px',background:flightBusy?'#9ca3af':T.navy,color:'#fff',borderRadius:10,fontSize:13,fontWeight:600,cursor:flightBusy?'wait':'pointer',width:'fit-content'}},
+          flightBusy?'Uploading…':'Upload Files ↑',
+          h('input',{type:'file',multiple:true,accept:'.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png',disabled:flightBusy,onChange:onFlightFiles,style:{display:'none'}}))
+      );
+    // 검수6: 국내(전임)은 은행정보 입력폼·Deadline 숨김. 단 강의료 금액·추가지급 안내는 표시.
+    if(isFT){
+      return h('div',{style:{display:'flex',flexDirection:'column',gap:16,maxWidth:760}},
+        h('h2',{style:{fontSize:20,fontWeight:700,color:T.navy,margin:0,fontFamily:"'Playfair Display',serif"}},'Salary Disbursement'),
+        paymentCard,
+        enrollmentCard,
+        flightCard,
+        h(Card,{style:{background:'#f8f9fb'}},
+          h('p',{style:{margin:0,fontSize:13,color:T.sub,lineHeight:1.6}},'Bank account information submission is not required for domestic full-time faculty.'))
+      );
+    }
+    return h('div',{style:{display:'flex',flexDirection:'column',gap:16,maxWidth:760}},
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}},
+        h('h2',{style:{fontSize:20,fontWeight:700,color:T.navy,margin:0,fontFamily:"'Playfair Display',serif"}},'Salary Disbursement'),
+        status.submitted ? Badge({status:'submitted'}) : Badge({status:'pending'})
+      ),
+      paymentCard,
+      enrollmentCard,
+      h(Card,{style:{background:'#f8f9fb'}},
+        h('p',{style:{margin:'0 0 8px',fontSize:16,color:T.red,fontWeight:700}},
+          'Bank Account Information Submission Deadline: ',h('span',{style:{color:T.red,fontWeight:800,fontSize:19}},salary.deadline||'—')),
+        h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'This form is used for Salary Disbursement for ',h('strong',null,salary.yearLabel||'2026-2027 WAY'),'. (',salary.yearLabel||'2026-2027 WAY',' 강의료 지급용)'),
+        h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'• Flight Reimbursement will also be given to this bank account information.'),
+        salary.payment4w && h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'• ',h('strong',null,'4-Week Program: '),salary.payment4w),
+        salary.payment6w && h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'• ',h('strong',null,'6-Week Program: '),salary.payment6w),
+        h('p',{style:{margin:'10px 0 0',fontSize:12,color:T.sub}},'Questions? Contact ',h('a',{href:'mailto:'+(salary.contactEmail||''),style:{color:T.navy}},salary.contactEmail||'isummer@yonsei.ac.kr'),'.'),
+        status.submitted && status.updatedAt && h('p',{style:{margin:'8px 0 0',fontSize:11,color:T.sub}},'Last updated: ',status.updatedAt)
+      ),
+      h(Card,null,
+        sectionHead('Section 1. Personal Information (개인정보)'),
+        fieldText({label:'Full Name of Faculty (either Korean or English)',kr:'이름 (한국어 또는 영어)',field:'fullName',required:true}),
+        fieldText({label:'Date of Birth',kr:'생년월일',field:'dateOfBirth',locked:true,placeholder:'YYYY-MM-DD'}),
+        fieldText({label:'Passport No., Alien Registration No. or Korean Registration No.',kr:'여권번호, 외국인등록번호 또는 주민등록번호',field:'passportOrArc',required:true}),
+        fieldText({label:'Nationality',kr:'국적',field:'nationality',required:true}),
+        fieldText({label:'Telephone No.',kr:'연락처',field:'telephone',required:true,placeholder:'e.g., +82-10-1234-5678'})
+      ),
+      h(Card,null,
+        sectionHead('Section 2. Classification of Resident or Non-Resident in Korea (한국 거주자/비거주자 판별)'),
+        h('div',{style:{margin:'-8px 0 14px',padding:'10px 12px',background:'#f8f9fb',borderRadius:8,fontSize:12,color:T.sub,lineHeight:1.55}},
+          h('p',{style:{margin:0,color:T.text}},'Section 2 is to determine your status as a Resident or Non-Resident in Korea. If you answer “No” to the questions below, you are classified as a Non-Resident in Korea.'),
+          h('p',{style:{margin:'4px 0 0'}},'Section 2는 한국 거주자/비거주자 여부를 판별하기 위한 항목입니다. 아래 질문에 모두 “No”로 답하면 비거주자로 분류됩니다.')),
+        fieldYesNo({label:'Do you have a permanent address in Korea?',kr:'한국에 영구적인 주소가 있습니까?',field:'permanentAddressKorea'}),
+        fieldYesNo({label:'Do you continue to live, or plan to live, in Korea for more than 183 days?',kr:'한국에 183일 이상 거주하고 있거나 거주할 계획입니까?',field:'liveOver183Days'}),
+        fieldYesNo({label:'Do you have a job that requires you to stay in Korea for more than 183 days continuously?',kr:'한국에 183일 이상 연속하여 체류해야 하는 직업이 있습니까?',field:'jobRequiresStay'}),
+        fieldYesNo({label:'Are there any family members (spouse, children, etc.) living together with you in Korea?',kr:'한국에 함께 거주하는 가족(배우자, 자녀 등)이 있습니까?',field:'familyInKorea'}),
+        fieldYesNo({label:'Do you have a basis for living in Korea such as business or real estate?',kr:'사업체나 부동산 등 한국에 거주할 기반이 있습니까?',field:'koreanBusinessOrRE'}),
+        residencySelector()
+      ),
+      // 검수: 거주/비거주 공통 단일 섹션 — 전 필드 수집, 해당 없는 항목은 N/A 입력.
+      !!form.residencyStatus && h(Card,null,
+        sectionHead('Section 3. Bank Information (은행정보 입력)'),
+        h('div',{style:{margin:'-8px 0 14px',padding:'10px 12px',background:'#f8f9fb',borderRadius:8,fontSize:12,color:T.sub,lineHeight:1.55}},
+          h('p',{style:{margin:0,color:T.text}},'All fields are required. If a field does not apply to your bank (e.g., ABA No. for non-US banks, or some fields for Korean domestic banks), please enter ',h('strong',null,'N/A'),'.'),
+          h('p',{style:{margin:'4px 0 0'}},'모든 항목은 필수입니다. 해당 사항이 없는 항목(예: 미국 외 은행의 ABA 번호, 한국 국내은행의 일부 항목)은 N/A로 입력해 주세요.')),
+        fieldText({label:'Beneficiary Name',kr:'수취인 (계좌명)',field:'beneficiaryName',required:true}),
+        fieldText({label:'Bank Name',kr:'은행명',field:'bankName',required:true}),
+        fieldText({label:'Bank Account No.',kr:'계좌정보',field:'accountNo',required:true,placeholder:'Leading zeros will be preserved'}),
+        fieldText({label:'Bank Branch Name',kr:'은행지점명',field:'branchName',required:true}),
+        fieldText({label:'Bank Street Name',kr:'은행 주소 정보',field:'bankAddress',required:true}),
+        fieldText({label:'Bank Town Location (District)',kr:'은행 소재지 (구/지역)',field:'bankTownLocation',required:true}),
+        fieldText({label:'Bank Town Name (City)',kr:'은행 소재 도시',field:'bankTownName',required:true}),
+        fieldText({label:'Bank Country',kr:'수취 은행 국가',field:'country',required:true}),
+        fieldText({label:'ABA No. (9 digits for American account; otherwise N/A)',kr:'ABA 번호 (미국 계좌만 해당, 그 외 N/A)',field:'abaNo',required:true}),
+        fieldText({label:'Swift Code',kr:'스위프트 코드',field:'swiftCode',required:true}),
+        h('div',{style:{margin:'8px 0 14px',padding:'10px 12px',background:'#f8f9fb',borderRadius:8,fontSize:12,color:T.sub,lineHeight:1.55}},
+          h('strong',{style:{color:T.text}},'Personal Address (for remittance form)'),h('br'),
+          'This appears on the bank remittance application as the beneficiary’s address. / 외화송금신청서에 수취인 주소로 기재됩니다.'),
+        fieldText({label:'Personal Address (Street / detailed address)',kr:'개인 주소 — 도로명·번지 등 상세주소',field:'streetAddress',required:true,placeholder:'e.g., 50 Yonsei-ro / 123 Main St, Apt 4'}),
+        fieldText({label:'Personal Town Location (District / Ward)',kr:'개인 주소 소재지 — 구·자치구',field:'region',required:true,placeholder:'e.g., Seodaemun-gu / Manhattan'}),
+        fieldText({label:'Personal Town Name (City)',kr:'개인 주소 도시',field:'city',required:true,placeholder:'e.g., Seoul / New York'}),
+        fieldText({label:'Personal Address Country',kr:'개인 주소 국가',field:'mailingCountry',required:true,placeholder:'e.g., Republic of Korea / United States'})
+      ),
+      h(Card,null,
+        sectionHead('Section 4. Consent of Personal Information (개인정보 수집·이용 동의)'),
+        h('div',{style:{marginBottom:8,padding:'12px 14px',background:'#f8f9fb',borderRadius:8}},
+          fieldCheckbox({field:'attestation',required:true,label:'I attest that all information provided above is true, and I will bear responsibility if any disadvantage occurs from false indication of the information.',kr:'본인은 위 정보가 모두 사실임을 확인하며, 허위 기재로 인한 불이익이 발생할 경우 그에 대한 책임을 부담합니다.'})
+        ),
+        h('div',{style:{padding:'12px 14px',background:'#f8f9fb',borderRadius:8}},
+          h('p',{style:{fontSize:12,color:T.sub,margin:'0 0 10px',lineHeight:1.6}},
+            h('strong',{style:{color:T.text}},'Consent to Collection and Use of Personal Information (개인정보 수집·이용 동의)'),h('br'),h('br'),
+            h('strong',null,'1. Purpose / 목적: '),'Salary disbursement and overseas remittance processing, fulfillment of the employment contract, and faculty personnel and tax/withholding reporting. ',h('em',null,'급여 지급 및 외화송금 처리, 고용계약 이행, 교원 인사 및 세무·원천징수 신고.'),h('br'),h('br'),
+            h('strong',null,'2. Items Collected / 수집 항목: '),'Full Name, Date of Birth, Passport No. / Alien Registration No., Nationality, Telephone, Address, tax-residency information, and bank account details (beneficiary name, bank name, account number, branch, bank address, SWIFT / ABA). ',h('em',null,'성명, 생년월일, 여권번호/외국인등록번호, 국적, 전화번호, 주소, 세무상 거주 정보, 은행 계좌정보(예금주, 은행명, 계좌번호, 지점, 은행 주소, SWIFT/ABA).'),h('br'),h('br'),
+            h('strong',null,'3. Provision to Third Parties / 제3자 제공: '),'Bank account information is provided to financial institutions (remitting/receiving banks) solely to process the salary remittance. ',h('em',null,'계좌정보는 급여 송금 처리를 위해 금융기관(송금·수취 은행)에 제공됩니다.'),h('br'),h('br'),
+            h('strong',null,'4. Retention Period / 보유·이용 기간: '),'Retained for the period required by relevant laws (e.g., tax and accounting records), then destroyed. ',h('em',null,'관련 법령에서 정한 기간(예: 세무·회계 보존기간) 동안 보유 후 파기.'),h('br'),h('br'),
+            h('em',null,'※ You have the right to refuse consent. However, as this information is required to process your salary, refusal will make salary disbursement impossible. 본인은 동의를 거부할 권리가 있으나, 위 정보는 급여 처리를 위해 필요하므로 거부 시 급여 지급이 불가능합니다.')
+          ),
+          fieldCheckbox({field:'consent',required:true,label:'I consent to the collection, use, and third-party provision of my personal information as described above.',kr:'본인은 위와 같이 개인정보를 수집·이용 및 제3자 제공하는 데 동의합니다.'})
+        )
+      ),
+      formError && h('div',{style:{padding:'10px 14px',background:'#fef2f2',color:T.red,borderRadius:8,fontSize:13}},formError),
+      justSaved && h('div',{style:{padding:'10px 14px',background:T.greenL,color:T.green,borderRadius:8,fontSize:13,fontWeight:500,display:'flex',alignItems:'center',gap:6}},Icons.check(),' Submitted successfully.'),
+      formLocked
+        ? h('div',{style:{padding:'12px 14px',background:T.greenL,color:T.green,borderRadius:8,fontSize:13,lineHeight:1.55}},
+            h('strong',null,'Form locked. '),'Your submission has been received',status.submittedAt?(' on '+status.submittedAt):'','. To correct any information, please contact ',h('a',{href:'mailto:'+(salary.contactEmail||''),style:{color:T.green,fontWeight:600}},salary.contactEmail||'isummer@yonsei.ac.kr'),'.')
+        : h('button',{onClick:submit,disabled:saving,style:S(btnPrimary,{opacity:saving?.7:1,maxWidth:260,alignSelf:'flex-start'})},
+            saving ? 'Saving…' : 'Submit'
+          ),
+      flightCard
+    );
+  }
+
+  var tabContent={dashboard:DashboardTab,courses:CoursesTab,documents:DocumentsTab,notices:NoticesTab,admin:AdminTab,salary:SalaryTab,events:EventsTab};
+
+  return h('div',{style:{minHeight:'100vh',background:T.bg,fontFamily:"'Noto Sans',-apple-system,sans-serif"}},
+    fadeStyle,
+    // Top Nav
+    h('nav',{style:{background:T.navy,padding:'0 24px',display:'flex',alignItems:'center',justifyContent:'space-between',height:56,position:'sticky',top:0,zIndex:100}},
+      h('div',{style:{display:'flex',alignItems:'center',gap:12}},
+        h('span',{style:{fontSize:20}},'🏛️'),
+        h('span',{style:{color:'#fff',fontSize:15,fontWeight:700,fontFamily:"'Playfair Display',serif"}},'WAY Faculty Portal')),
+      h('div',{style:{display:'flex',alignItems:'center',gap:16}},
+        h('span',{style:{color:'rgba(255,255,255,.7)',fontSize:13}},faculty.name),
+        h('button',{onClick:handleLogout,style:{background:'rgba(255,255,255,.1)',border:'none',borderRadius:8,padding:'6px 12px',color:'rgba(255,255,255,.8)',display:'flex',alignItems:'center',gap:6,fontSize:12,fontFamily:'inherit',fontWeight:500}},
+          Icons.logout(),' Sign Out'))
+    ),
+    h('div',{style:{display:'flex',maxWidth:1100,margin:'0 auto',padding:'0 16px'}},
+      // Sidebar
+      h('aside',{className:'desk-show',style:{width:220,padding:'20px 0',flexShrink:0,position:'sticky',top:56,height:'calc(100vh - 56px)',display:'none'}},
+        h('div',{style:{display:'flex',flexDirection:'column',gap:4}},
+          tabs.map(function(t){
+            return h('button',{key:t.key,onClick:function(){setTab(t.key);setSelNotice(null);},style:{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderRadius:10,border:'none',background:tab===t.key?'rgba(0,55,100,.08)':'transparent',color:tab===t.key?T.navy:T.sub,fontSize:14,fontWeight:tab===t.key?600:400,cursor:'pointer',fontFamily:'inherit',textAlign:'left'}},
+              t.icon(),' ',t.label);
+          }))),
+      // Main
+      h('main',{style:{flex:1,padding:'20px 0 100px',minWidth:0,marginLeft:16}},
+        h(tabContent[tab]))
+    ),
+    // Mobile Bottom Nav
+    h('div',{className:'mob-hide',style:{position:'fixed',bottom:0,left:0,right:0,background:'#fff',borderTop:'1px solid '+T.bdr,display:'flex',justifyContent:'space-around',padding:'6px 0',zIndex:100}},
+      tabs.map(function(t){
+        return h('button',{key:t.key,onClick:function(){setTab(t.key);setSelNotice(null);},style:{display:'flex',flexDirection:'column',alignItems:'center',gap:2,background:'none',border:'none',padding:'6px 12px',color:tab===t.key?T.navy:T.sub,fontFamily:'inherit',fontSize:10,fontWeight:tab===t.key?600:400}},
+          t.icon(),t.label);
+      }))
+  );
+}
+
+ReactDOM.render(React.createElement(App), document.getElementById('root'));
+  </script>
+</body>
+</html>
