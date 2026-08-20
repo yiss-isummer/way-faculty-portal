@@ -815,7 +815,6 @@ function App(){
     var _rm=useState(''),reappMsg=_rm[0],setReappMsg=_rm[1];
     // 동의서(consent)는 업로드가 아니라 포털 내 열람+전자서명
     var _co=useState(false),consentOpen=_co[0],setConsentOpen=_co[1];
-    var _cp=useState({}),consentPicks=_cp[0],setConsentPicks=_cp[1];
     var _cg=useState(''),consentOrg=_cg[0],setConsentOrg=_cg[1];
     var _ci=useState(''),consentIdNum=_ci[0],setConsentIdNum=_ci[1];
     var _cn=useState(''),consentNat=_cn[0],setConsentNat=_cn[1];
@@ -823,32 +822,20 @@ function App(){
     var _cb=useState(false),consentBusy=_cb[0],setConsentBusy=_cb[1];
     var _cm=useState(''),consentMsg=_cm[0],setConsentMsg=_cm[1];
     var consentSigned = reappDocs.some(function(d){return d.key==='consent'&&d.uploaded});
-    var consentRefused = CONSENT_KEYS.some(function(k){return consentPicks[k]==='noconsent'});
-    var consentAllAgreed = CONSENT_KEYS.every(function(k){return consentPicks[k]==='consent'});
-    var consentCanSubmit = consentAllAgreed&&consentOrg.trim()&&consentNat.trim()&&consentIdNum.trim()&&consentSig&&!consentBusy;
+    var consentCanSubmit = consentOrg.trim()&&consentNat.trim()&&consentIdNum.trim()&&consentSig&&!consentBusy;
     // 제출 버튼이 왜 잠겨 있는지 보여준다 — 라디오 4개가 긴 문서 안에 흩어져 있어 놓치기 쉽다.
     var consentMissing=[];
-    if(!consentAllAgreed) consentMissing.push('Consent selections ('+CONSENT_KEYS.filter(function(k){return consentPicks[k]==='consent'}).length+'/4)');
     if(!consentOrg.trim()) consentMissing.push('Affiliated Organization');
     if(!consentNat.trim()) consentMissing.push('Nationality');
     if(!consentIdNum.trim()) consentMissing.push('ID Number');
     if(!consentSig) consentMissing.push('Signature');
-
-    function consentRadio(key){
-      return h('div',{style:{display:'flex',gap:18,margin:'8px 0 2px'}},
-        [['consent','I consent'],['noconsent','I do not consent']].map(function(opt){
-          var checked=consentPicks[key]===opt[0];
-          return h('label',{key:opt[0],style:{display:'inline-flex',alignItems:'center',gap:6,fontSize:13,fontWeight:600,color:checked?(opt[0]==='consent'?T.green:T.red):T.text,cursor:consentBusy?'default':'pointer'}},
-            h('input',{type:'radio',name:'consent_'+key,checked:checked,disabled:consentBusy,onChange:function(){setConsentPicks(function(p){var n=Object.assign({},p);n[key]=opt[0];return n})}}),opt[1]);
-        }));
-    }
 
     function submitConsent(){
       if(!consentCanSubmit) return;
       setConsentBusy(true);setConsentMsg('');
       callApi('submitReappointmentConsent',{token:sessionStorage.getItem('portal_token'),consent:{
         organization:consentOrg.trim(),idNumber:consentIdNum.trim(),nationality:consentNat.trim(),
-        consents:consentPicks,signatureDataUrl:consentSig}}).then(function(res){
+        consents:CONSENT_KEYS.reduce(function(o,k){o[k]='consent';return o},{}),signatureDataUrl:consentSig}}).then(function(res){
         setConsentBusy(false);
         if(res.expired){handleLogout();return;}
         if(!res.success){setConsentMsg(res.message||'Submission failed. Please try again.');return;}
@@ -866,11 +853,10 @@ function App(){
         CONSENT_DOC.map(function(sec,si){
           return h('div',{key:si,style:{marginBottom:14}},
             sec.title&&h('div',{style:{fontSize:13,fontWeight:700,color:T.navy,margin:'0 0 6px',paddingBottom:3,borderBottom:'1px solid '+T.bdr}},sec.title),
-            sec.paras.map(function(pr,pi){return h('p',{key:pi,style:{fontSize:12,color:T.text,lineHeight:1.6,margin:'0 0 5px',paddingLeft:pr.charAt(0)==='\u2022'?10:0}},pr)}),
-            sec.key&&consentRadio(sec.key));
+            sec.paras.map(function(pr,pi){return h('p',{key:pi,style:{fontSize:12,color:T.text,lineHeight:1.6,margin:'0 0 5px',paddingLeft:pr.charAt(0)==='\u2022'?10:0}},pr)}));
         })),
-      consentRefused&&h('div',{style:{marginTop:10,padding:'10px 12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,fontSize:12,color:T.red,lineHeight:1.6}},
-        h('strong',null,'All consent items are required for the appointment process.'),' If you do not wish to consent, please contact ',h('a',{href:'mailto:isummer@yonsei.ac.kr',style:{color:T.red,fontWeight:700}},'isummer@yonsei.ac.kr'),' before submitting. / 임용 절차상 모든 항목에 대한 동의가 필요합니다. 동의를 원하지 않으시면 제출 전에 사무실로 연락해 주세요.'),
+      h('div',{style:{marginTop:10,padding:'10px 12px',background:'#f0f4f8',borderRadius:8,fontSize:12,color:T.text,lineHeight:1.6}},
+        h('strong',null,'By clicking \"Agree & Sign\" below, you consent to ALL items above.'),' If you do not wish to consent, please do not submit and contact ',h('a',{href:'mailto:isummer@yonsei.ac.kr',style:{color:T.navy,fontWeight:700}},'isummer@yonsei.ac.kr'),' instead. / 아래 버튼을 누르면 위 모든 항목에 동의하는 것으로 처리됩니다. 동의를 원하지 않으시면 제출하지 마시고 사무실로 연락해 주세요.'),
       h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:10,marginTop:12}},
         h('div',null,h('div',{style:{fontSize:11,fontWeight:600,color:T.sub,marginBottom:3}},'Affiliated Organization (\uc18c\uc18d\ub300\ud559) *'),
           h('input',{value:consentOrg,disabled:consentBusy,onChange:function(e){setConsentOrg(e.target.value)},placeholder:'e.g., Yonsei University',style:consentInputStyle})),
