@@ -124,6 +124,7 @@ function loadPortalData(token){
     return Object.assign({},MOCK,dash.faculty,{
       notices:(nx.success&&nx.notices)?nx.notices:[],
       events:(ex&&ex.success&&ex.events)?ex.events:[],
+      eventsOpen:!(ex&&ex.open===false),   // events_open=N 이면 Events 탭 숨김
       documents: dash.documents || MOCK.documents,
       courses: dash.courses || MOCK.courses,
       housing: dash.housing || MOCK.housing,
@@ -329,7 +330,8 @@ function App(){
         {key:'events',label:'Events',icon:Icons.events},
         {key:'notices',label:'Notices',icon:Icons.notices},
       ].filter(function(t){ return !(isFT && t.key==='documents'); })  // 검수5: 전임은 Documents 숨김
-       .filter(function(t){ return !(t.key==='salary' && !salaryOpen); });  // salary_open=N 이면 숨김
+       .filter(function(t){ return !(t.key==='salary' && !salaryOpen); })   // salary_open=N 이면 숨김
+       .filter(function(t){ return !(t.key==='events' && faculty.eventsOpen===false); });  // events_open=N 이면 숨김
 
   // Dashboard 달력: PortalCalendar 일정(navy) + RSVP 행사(gold, 날짜 파싱 가능한 것만).
   // 데이터가 하나도 없으면 카드 자체를 숨김. 월 이동 자유 — 연도 하드코딩 없음.
@@ -493,7 +495,7 @@ function App(){
           });
           if(actions.length===0){
             return h('div',{style:{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:T.greenL,borderRadius:8}},
-              h('span',{style:{color:T.green}},Icons.check()),h('span',{style:{fontSize:13,color:T.green,fontWeight:500}},'All tasks completed!'));
+              h('span',{style:{color:T.green}},Icons.check()),h('span',{style:{fontSize:13,color:T.green,fontWeight:500}},'No action required at this time.'));
           }
           return actions.map(function(a){
             var openBtn = a.tab
@@ -1136,6 +1138,13 @@ function App(){
                 h('div',{style:{fontSize:13,fontWeight:700,color:(salarySettings.salary_open==='N')?T.red:T.green}},(salarySettings.salary_open==='N')?'Salary form: HIDDEN from faculty':'Salary form: VISIBLE to faculty'),
                 h('div',{style:{fontSize:11,color:T.sub,marginTop:2}},'교원 Salary 탭 노출 여부. 변경 후 Save Settings를 눌러야 적용됩니다.')),
               h('select',{value:salarySettings.salary_open==='N'?'N':'Y',onChange:function(e){var v=e.target.value;setSalarySettings(function(prev){var n=Object.assign({},prev);n.salary_open=v;return n;})},style:S(inputStyle(),{flex:'0 0 110px',width:'auto',fontSize:13,padding:'6px 8px'})},
+                h('option',{value:'Y'},'Open'),h('option',{value:'N'},'Closed'))
+            ),
+            h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'10px 12px',marginTop:8,background:(salarySettings.events_open==='N')?'#f8f9fb':T.greenL,borderRadius:8}},
+              h('div',null,
+                h('div',{style:{fontSize:13,fontWeight:700,color:(salarySettings.events_open==='N')?T.sub:T.green}},(salarySettings.events_open==='N')?'Events tab: HIDDEN from faculty':'Events tab: VISIBLE to faculty'),
+                h('div',{style:{fontSize:11,color:T.sub,marginTop:2}},'행사 RSVP 탭 노출 여부. 행사를 운영하지 않는 학기에는 Closed 로 두세요.')),
+              h('select',{value:salarySettings.events_open==='N'?'N':'Y',onChange:function(e){var v=e.target.value;setSalarySettings(function(prev){var n=Object.assign({},prev);n.events_open=v;return n;})},style:S(inputStyle(),{flex:'0 0 110px',width:'auto',fontSize:13,padding:'6px 8px'})},
                 h('option',{value:'Y'},'Open'),h('option',{value:'N'},'Closed'))
             ),
             h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:'0 16px',marginTop:8}},
