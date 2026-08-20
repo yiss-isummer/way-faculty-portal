@@ -1344,13 +1344,6 @@ function App(){
               h('select',{value:salarySettings.salary_open==='N'?'N':'Y',onChange:function(e){var v=e.target.value;setSalarySettings(function(prev){var n=Object.assign({},prev);n.salary_open=v;return n;})},style:S(inputStyle(),{flex:'0 0 110px',width:'auto',fontSize:13,padding:'6px 8px'})},
                 h('option',{value:'Y'},'Open'),h('option',{value:'N'},'Closed'))
             ),
-            h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'10px 12px',marginTop:8,background:(salarySettings.events_open==='N')?'#f8f9fb':T.greenL,borderRadius:8}},
-              h('div',null,
-                h('div',{style:{fontSize:13,fontWeight:700,color:(salarySettings.events_open==='N')?T.sub:T.green}},(salarySettings.events_open==='N')?'Events tab: HIDDEN from faculty':'Events tab: VISIBLE to faculty'),
-                h('div',{style:{fontSize:11,color:T.sub,marginTop:2}},'행사 RSVP 탭 노출 여부. 행사를 운영하지 않는 학기에는 Closed 로 두세요.')),
-              h('select',{value:salarySettings.events_open==='N'?'N':'Y',onChange:function(e){var v=e.target.value;setSalarySettings(function(prev){var n=Object.assign({},prev);n.events_open=v;return n;})},style:S(inputStyle(),{flex:'0 0 110px',width:'auto',fontSize:13,padding:'6px 8px'})},
-                h('option',{value:'Y'},'Open'),h('option',{value:'N'},'Closed'))
-            ),
             h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:'0 16px',marginTop:8}},
               ssField('Deadline','salary_deadline','e.g., 2026-06-12'),
               ssField('Year Label','salary_year_label','e.g., 2026-2027 WAY'),
@@ -1367,6 +1360,14 @@ function App(){
                   h('option',{value:'Y'},'Open'),h('option',{value:'N'},'Closed'))
               ),
               ssField('Edit Deadline','syllabus_edit_deadline','e.g., 2026-12-15 (비우면 마감 없음)')),
+            h('div',{style:{marginTop:14,paddingTop:12,borderTop:'1px solid '+T.bdr}},
+              h('div',{style:{fontSize:13,fontWeight:700,color:T.navy,marginBottom:6}},'Events'),
+              h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'10px 12px',background:(salarySettings.events_open==='N')?'#f8f9fb':T.greenL,borderRadius:8}},
+                h('div',null,
+                  h('div',{style:{fontSize:13,fontWeight:700,color:(salarySettings.events_open==='N')?T.sub:T.green}},(salarySettings.events_open==='N')?'Events tab: HIDDEN from faculty':'Events tab: VISIBLE to faculty'),
+                  h('div',{style:{fontSize:11,color:T.sub,marginTop:2}},'행사 RSVP 탭 노출 여부. 행사를 운영하지 않는 학기에는 Closed 로 두세요.')),
+                h('select',{value:salarySettings.events_open==='N'?'N':'Y',onChange:function(e){var v=e.target.value;setSalarySettings(function(prev){var n=Object.assign({},prev);n.events_open=v;return n;})},style:S(inputStyle(),{flex:'0 0 110px',width:'auto',fontSize:13,padding:'6px 8px'})},
+                  h('option',{value:'Y'},'Open'),h('option',{value:'N'},'Closed')))),
             h('div',{style:{display:'flex',justifyContent:'flex-end',marginTop:4}},
               h('button',{onClick:saveSettings,disabled:ssSaving,style:{padding:'6px 16px',background:T.navy,color:'#fff',border:'none',borderRadius:6,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:ssSaving?'wait':'pointer',opacity:ssSaving?0.7:1}},ssSaving?'Saving…':'Save Settings'))
           ):null
