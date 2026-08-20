@@ -1660,7 +1660,6 @@ function App(){
         h('p',{style:{margin:'0 0 8px',fontSize:16,color:T.red,fontWeight:700}},
           'Bank Account Information Submission Deadline: ',h('span',{style:{color:T.red,fontWeight:800,fontSize:19}},salary.deadline||'—')),
         h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'This form is used for Salary Disbursement for ',h('strong',null,salary.yearLabel||'2026-2027 WAY'),'. (',salary.yearLabel||'2026-2027 WAY',' 강의료 지급용)'),
-        h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'• Flight Reimbursement will also be given to this bank account information.'),
         salary.payment4w && h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'• ',h('strong',null,'Payment Schedule: '),salary.payment4w),
         h('p',{style:{margin:'10px 0 0',fontSize:12,color:T.sub}},'Questions? Contact ',h('a',{href:'mailto:'+(salary.contactEmail||''),style:{color:T.navy}},salary.contactEmail||'isummer@yonsei.ac.kr'),'.'),
         status.submitted && status.updatedAt && h('p',{style:{margin:'8px 0 0',fontSize:11,color:T.sub}},'Last updated: ',status.updatedAt)
