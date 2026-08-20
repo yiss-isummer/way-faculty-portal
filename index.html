@@ -841,7 +841,6 @@ function App(){
         if(!res.success){setConsentMsg(res.message||'Submission failed. Please try again.');return;}
         if(res.status&&res.status.docTypes) setReappDocs(res.status.docTypes);
         setConsentOpen(false);
-        downloadProxyFile('consent');  // 하계와 동일하게 서명본 PDF 를 즉시 내려준다
       }).catch(function(){setConsentBusy(false);setConsentMsg('Network error. Please try again.');});
     }
 
