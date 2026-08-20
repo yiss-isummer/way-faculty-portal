@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WAY Faculty Portal</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏛️</text></svg>">
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&family=Dancing+Script:wght@600&display=swap" rel="stylesheet">
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Noto Sans',-apple-system,BlinkMacSystemFont,sans-serif;background:#f0f2f5;color:#1a1a2e;min-height:100vh}
@@ -151,11 +151,16 @@ function Badge(props){
 }
 
 // ── 서명 캔버스 ──
-// 계약서 서명과 재임용 동의서 서명이 함께 쓴다. 그린 결과를 PNG dataURL 로 onChange 에 넘기고,
-// 비어 있으면 null 을 넘긴다(부모가 제출 버튼을 잠그는 근거).
-// 마우스·터치 모두 Pointer Events 하나로 처리한다.
+// 계약서 서명과 재임용 동의서 서명이 함께 쓴다. 세 가지 입력 방식:
+//   draw   — 마우스·터치로 직접 서명 (Pointer Events)
+//   type   — 이름을 타이핑하면 손글씨 폰트(Dancing Script)로 렌더
+//   upload — 서명 이미지 파일(PNG/JPG) 업로드
+// 어떤 방식이든 결과는 PNG dataURL 로 onChange 에 전달. 비어 있으면 null.
 function SignaturePad(props){
   var canvasRef=useRef(null), drawingRef=useRef(false), dirtyRef=useRef(false);
+  var _m=useState('draw'),sigMode=_m[0],setSigMode=_m[1];
+  var _t=useState(''),typed=_t[0],setTyped=_t[1];
+  var _e=useState(''),sigErr=_e[0],setSigErr=_e[1];
   var onChange=props.onChange, disabled=props.disabled;
 
   // 캔버스 픽셀 크기를 표시 크기 × DPR 로 맞춘다 — 안 그러면 선이 뭉개진다.
@@ -165,7 +170,6 @@ function SignaturePad(props){
       var dpr=window.devicePixelRatio||1;
       var w=cv.clientWidth, hgt=cv.clientHeight;
       if(!w||!hgt) return;
-      // 크기가 바뀌면 캔버스가 지워진다. 이미 그린 게 있으면 유지.
       var prev=dirtyRef.current?cv.toDataURL('image/png'):null;
       cv.width=Math.round(w*dpr); cv.height=Math.round(hgt*dpr);
       var ctx=cv.getContext('2d');
@@ -178,56 +182,134 @@ function SignaturePad(props){
     return function(){window.removeEventListener('resize',fit)};
   },[]);
 
-  function pos(e){
-    var r=canvasRef.current.getBoundingClientRect();
-    return {x:e.clientX-r.left, y:e.clientY-r.top};
+  function wipe(){
+    var cv=canvasRef.current, ctx=cv.getContext('2d');
+    var dpr=window.devicePixelRatio||1;
+    ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height); ctx.restore();
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    dirtyRef.current=false;
   }
+  // dataURL 이 서버 상한(500KB)에 걸리면 저해상도로 재인코딩해서 구제한다 (업로드 사진 대비).
   function emit(){
     if(!onChange) return;
-    onChange(dirtyRef.current?canvasRef.current.toDataURL('image/png'):null);
+    if(!dirtyRef.current){onChange(null);return;}
+    var cv=canvasRef.current, data=cv.toDataURL('image/png');
+    if(data.length>450000){
+      var tmp=document.createElement('canvas');
+      tmp.width=600; tmp.height=Math.round(600*cv.height/cv.width);
+      tmp.getContext('2d').drawImage(cv,0,0,tmp.width,tmp.height);
+      data=tmp.toDataURL('image/png');
+      if(data.length>450000){setSigErr('Image is too complex. Please use a simpler signature image. / 이미지가 너무 큽니다.');onChange(null);return;}
+    }
+    setSigErr('');
+    onChange(data);
   }
-  function start(e){
-    if(disabled) return;
+  function clearAll(){
+    wipe(); setTyped(''); setSigErr('');
+    if(onChange) onChange(null);
+  }
+  function switchMode(m){
+    if(disabled||m===sigMode) return;
+    setSigMode(m); clearAll();
+  }
+
+  // draw 모드
+  function pos(e){var r=canvasRef.current.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top}}
+  function pStart(e){
+    if(disabled||sigMode!=='draw') return;
     e.preventDefault();
     var cv=canvasRef.current, ctx=cv.getContext('2d'), p=pos(e);
     drawingRef.current=true;
     try{cv.setPointerCapture(e.pointerId)}catch(err){}
     ctx.beginPath(); ctx.moveTo(p.x,p.y);
-    // 점 하나만 찍고 끝나는 경우에도 보이도록 미세 선을 긋는다.
     ctx.lineTo(p.x+0.01,p.y+0.01); ctx.stroke();
     dirtyRef.current=true;
   }
-  function move(e){
-    if(disabled||!drawingRef.current) return;
+  function pMove(e){
+    if(disabled||sigMode!=='draw'||!drawingRef.current) return;
     e.preventDefault();
     var ctx=canvasRef.current.getContext('2d'), p=pos(e);
     ctx.lineTo(p.x,p.y); ctx.stroke();
   }
-  function end(e){
+  function pEnd(e){
     if(!drawingRef.current) return;
     drawingRef.current=false;
     try{canvasRef.current.releasePointerCapture(e.pointerId)}catch(err){}
     emit();
   }
-  function clear(){
-    var cv=canvasRef.current, ctx=cv.getContext('2d');
-    var dpr=window.devicePixelRatio||1;
-    ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height); ctx.restore();
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-    dirtyRef.current=false; emit();
+
+  // type 모드 — 손글씨 폰트로 렌더. 폰트 로딩이 끝난 뒤 다시 그린다.
+  function renderTyped(text){
+    setTyped(text);
+    var cv=canvasRef.current;
+    function draw(){
+      wipe();
+      var t=text.trim();
+      if(t){
+        var ctx=cv.getContext('2d');
+        var size=54;
+        ctx.font='600 '+size+'px "Dancing Script", cursive';
+        while(size>22 && ctx.measureText(t).width > cv.clientWidth-48){size-=4;ctx.font='600 '+size+'px "Dancing Script", cursive';}
+        ctx.fillStyle='#1a1a2e';
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(t, cv.clientWidth/2, cv.clientHeight/2-8);
+        dirtyRef.current=true;
+      }
+      emit();
+    }
+    if(document.fonts&&document.fonts.load){document.fonts.load('600 54px "Dancing Script"').then(draw).catch(draw);}
+    else draw();
   }
 
+  // upload 모드 — 캔버스에 맞춰 그려 PNG 로 정규화
+  function onUpload(e){
+    var f=(e.target.files||[])[0];
+    e.target.value='';
+    if(!f) return;
+    if(['image/png','image/jpeg'].indexOf(f.type)===-1){setSigErr('PNG or JPG only. / PNG·JPG만 가능합니다.');return;}
+    if(f.size>5*1024*1024){setSigErr('File exceeds 5MB. / 5MB 이하로 올려주세요.');return;}
+    var reader=new FileReader();
+    reader.onload=function(){
+      var img=new Image();
+      img.onload=function(){
+        wipe();
+        var cv=canvasRef.current, ctx=cv.getContext('2d');
+        var maxW=cv.clientWidth-24, maxH=cv.clientHeight-24;
+        var sc=Math.min(maxW/img.width, maxH/img.height, 1);
+        var w=img.width*sc, hh=img.height*sc;
+        ctx.drawImage(img,(cv.clientWidth-w)/2,(cv.clientHeight-hh)/2,w,hh);
+        dirtyRef.current=true;
+        emit();
+      };
+      img.onerror=function(){setSigErr('Could not read the image. / 이미지를 읽을 수 없습니다.')};
+      img.src=String(reader.result);
+    };
+    reader.readAsDataURL(f);
+  }
+
+  var tabs=[['draw','\u270d Draw \uc9c1\uc811 \uc11c\uba85'],['type','\u2328 Type \ud0c0\uc774\ud551'],['upload','\ud83d\uddbc Upload \uc774\ubbf8\uc9c0']];
   return h('div',null,
+    h('div',{style:{display:'flex',gap:6,marginBottom:8}},
+      tabs.map(function(tb){
+        var active=sigMode===tb[0];
+        return h('button',{key:tb[0],type:'button',onClick:function(){switchMode(tb[0])},disabled:disabled,
+          style:{padding:'6px 12px',background:active?T.navy:'#fff',color:active?'#fff':T.sub,border:'1px solid '+(active?T.navy:T.bdr),borderRadius:8,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:disabled?'not-allowed':'pointer'}},tb[1]);
+      })),
+    sigMode==='type'&&h('input',{value:typed,disabled:disabled,onChange:function(e){renderTyped(e.target.value)},placeholder:'Type your full name / \uc774\ub984\uc744 \uc785\ub825\ud558\uc138\uc694',
+      style:{width:'100%',padding:'8px 10px',border:'1px solid '+T.bdr,borderRadius:8,fontSize:13,fontFamily:'inherit',marginBottom:8}}),
+    sigMode==='upload'&&h('label',{style:{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 14px',background:disabled?'#9ca3af':T.navy,color:'#fff',borderRadius:8,fontSize:12,fontWeight:600,cursor:disabled?'not-allowed':'pointer',marginBottom:8}},
+      'Choose signature image \u2191',
+      h('input',{type:'file',accept:'.png,.jpg,.jpeg,image/png,image/jpeg',disabled:disabled,onChange:onUpload,style:{display:'none'}})),
     h('div',{style:{position:'relative',border:'1px solid '+T.bdr,borderRadius:10,background:disabled?'#f8f9fb':'#fff',overflow:'hidden'}},
       h('canvas',{ref:canvasRef,
-        onPointerDown:start,onPointerMove:move,onPointerUp:end,onPointerLeave:end,onPointerCancel:end,
-        style:{display:'block',width:'100%',height:170,touchAction:'none',cursor:disabled?'not-allowed':'crosshair'}}),
-      // 안내선 — 캔버스가 아니라 위에 겹쳐 그려서 서명 이미지에는 안 들어간다.
+        onPointerDown:pStart,onPointerMove:pMove,onPointerUp:pEnd,onPointerLeave:pEnd,onPointerCancel:pEnd,
+        style:{display:'block',width:'100%',height:170,touchAction:'none',cursor:(disabled||sigMode!=='draw')?'default':'crosshair'}}),
       h('div',{style:{position:'absolute',left:24,right:24,bottom:44,borderBottom:'1px dashed '+T.bdr,pointerEvents:'none'}}),
-      h('div',{style:{position:'absolute',left:24,bottom:22,fontSize:11,color:T.sub,pointerEvents:'none'}},'Sign above / 위에 서명해 주세요')
-    ),
+      h('div',{style:{position:'absolute',left:24,bottom:22,fontSize:11,color:T.sub,pointerEvents:'none'}},
+        sigMode==='draw'?'Sign above / \uc704\uc5d0 \uc11c\uba85\ud574 \uc8fc\uc138\uc694':(sigMode==='type'?'Preview / \ubbf8\ub9ac\ubcf4\uae30':'Uploaded image preview / \uc5c5\ub85c\ub4dc \ubbf8\ub9ac\ubcf4\uae30'))),
+    sigErr&&h('div',{style:{marginTop:6,fontSize:12,color:T.red}},sigErr),
     h('div',{style:{display:'flex',justifyContent:'flex-end',marginTop:8}},
-      h('button',{type:'button',onClick:clear,disabled:disabled,
+      h('button',{type:'button',onClick:clearAll,disabled:disabled,
         style:{padding:'6px 14px',background:'#fff',color:T.sub,border:'1px solid '+T.bdr,borderRadius:6,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:disabled?'not-allowed':'pointer'}},'Clear'))
   );
 }
@@ -743,7 +825,7 @@ function App(){
     var consentSigned = reappDocs.some(function(d){return d.key==='consent'&&d.uploaded});
     var consentRefused = CONSENT_KEYS.some(function(k){return consentPicks[k]==='noconsent'});
     var consentAllAgreed = CONSENT_KEYS.every(function(k){return consentPicks[k]==='consent'});
-    var consentCanSubmit = consentAllAgreed&&consentOrg.trim()&&consentNat.trim()&&consentSig&&!consentBusy;
+    var consentCanSubmit = consentAllAgreed&&consentOrg.trim()&&consentNat.trim()&&consentIdNum.trim()&&consentSig&&!consentBusy;
 
     function consentRadio(key){
       return h('div',{style:{display:'flex',gap:18,margin:'8px 0 2px'}},
@@ -765,6 +847,7 @@ function App(){
         if(!res.success){setConsentMsg(res.message||'Submission failed. Please try again.');return;}
         if(res.status&&res.status.docTypes) setReappDocs(res.status.docTypes);
         setConsentOpen(false);
+        downloadProxyFile('consent');  // 하계와 동일하게 서명본 PDF 를 즉시 내려준다
       }).catch(function(){setConsentBusy(false);setConsentMsg('Network error. Please try again.');});
     }
 
@@ -786,8 +869,8 @@ function App(){
           h('input',{value:consentOrg,disabled:consentBusy,onChange:function(e){setConsentOrg(e.target.value)},placeholder:'e.g., Yonsei University',style:consentInputStyle})),
         h('div',null,h('div',{style:{fontSize:11,fontWeight:600,color:T.sub,marginBottom:3}},'Nationality (\uad6d\uc801) *'),
           h('input',{value:consentNat,disabled:consentBusy,onChange:function(e){setConsentNat(e.target.value)},placeholder:'e.g., Republic of Korea',style:consentInputStyle})),
-        h('div',null,h('div',{style:{fontSize:11,fontWeight:600,color:T.sub,marginBottom:3}},'ID Number (\uc2e0\ubd84\uc99d \ubc88\ud638)'),
-          h('input',{value:consentIdNum,disabled:consentBusy,onChange:function(e){setConsentIdNum(e.target.value)},placeholder:'Employee ID or Registration No.',style:consentInputStyle}))),
+        h('div',null,h('div',{style:{fontSize:11,fontWeight:600,color:T.sub,marginBottom:3}},'ID Number (\uc5ec\uad8c\ubc88\ud638 \ub610\ub294 \uc8fc\ubbfc\ub4f1\ub85d\ubc88\ud638) *'),
+          h('input',{value:consentIdNum,disabled:consentBusy,onChange:function(e){setConsentIdNum(e.target.value)},placeholder:'Passport No. or Resident Registration No.',style:consentInputStyle}))),
       h('div',{style:{marginTop:12}},
         h('div',{style:{fontSize:11,fontWeight:600,color:T.sub,marginBottom:4}},'Signature (\uc11c\uba85) *'),
         h(SignaturePad,{disabled:consentBusy,onChange:setConsentSig})),
@@ -839,7 +922,7 @@ function App(){
               h('div',{style:{fontSize:11,color:T.sub,marginTop:1}},d.nameKr),
               d.uploaded&&h('div',{style:{fontSize:11,color:T.sub,marginTop:3,wordBreak:'break-all'}},'📎 '+d.fileName+(d.uploadedAt?(' · '+d.uploadedAt):''))),
             (d.method==='sign'||d.key==='consent')?
-              (d.uploaded?h('span',{style:{flexShrink:0,fontSize:12,fontWeight:700,color:T.green,whiteSpace:'nowrap'}},'Signed \u2713')
+              (d.uploaded?h('div',{style:{flexShrink:0,display:'flex',alignItems:'center',gap:10}},h('span',{style:{fontSize:12,fontWeight:700,color:T.green,whiteSpace:'nowrap'}},'Signed \u2713'),h('button',{onClick:function(){setDownloading('consent');downloadProxyFile('consent').then(function(){setDownloading(null)})},disabled:downloading==='consent',style:{background:'none',border:'none',padding:0,color:T.navy,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:downloading==='consent'?'wait':'pointer',whiteSpace:'nowrap'}},downloading==='consent'?'Downloading\u2026':'Download PDF'))
                 :h('button',{onClick:function(){setConsentOpen(!consentOpen)},style:{flexShrink:0,padding:'7px 14px',background:consentOpen?'rgba(0,55,100,.06)':T.navy,color:consentOpen?T.navy:'#fff',border:'none',borderRadius:9,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:'pointer',whiteSpace:'nowrap'}},consentOpen?'Close':'Review & Sign \u2192'))
             :h('label',{style:{flexShrink:0,display:'inline-flex',alignItems:'center',gap:5,padding:'7px 14px',background:reappBusy?'#9ca3af':(d.uploaded?'rgba(0,55,100,.06)':T.navy),color:d.uploaded&&!reappBusy?T.navy:'#fff',borderRadius:9,fontSize:12,fontWeight:600,cursor:reappBusy?'wait':'pointer',whiteSpace:'nowrap'}},
               busy?'Uploading…':(d.uploaded?'Replace ↑':'Upload ↑'),
