@@ -1152,8 +1152,7 @@ function App(){
               ssField('Year Label','salary_year_label','e.g., 2026-2027 WAY'),
               ssField('Contact Email','salary_contact_email','e.g., isummer@yonsei.ac.kr')
             ),
-            ssField('4-Week Payment Info','salary_payment_4w',''),
-            ssField('6-Week Payment Info','salary_payment_6w',''),
+            ssField('Payment Info','salary_payment_4w','계약서 6조(c) 문구와 일치시킬 것'),
             h('div',{style:{marginTop:14,paddingTop:12,borderTop:'1px solid '+T.bdr}},
               h('div',{style:{fontSize:13,fontWeight:700,color:T.navy,marginBottom:6}},'Syllabus Edit'),
               h('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,padding:'10px 12px',marginBottom:6,background:(salarySettings.syllabus_edit_open==='Y')?T.greenL:'#f8f9fb',borderRadius:8}},
@@ -1662,8 +1661,7 @@ function App(){
           'Bank Account Information Submission Deadline: ',h('span',{style:{color:T.red,fontWeight:800,fontSize:19}},salary.deadline||'—')),
         h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'This form is used for Salary Disbursement for ',h('strong',null,salary.yearLabel||'2026-2027 WAY'),'. (',salary.yearLabel||'2026-2027 WAY',' 강의료 지급용)'),
         h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'• Flight Reimbursement will also be given to this bank account information.'),
-        salary.payment4w && h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'• ',h('strong',null,'4-Week Program: '),salary.payment4w),
-        salary.payment6w && h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'• ',h('strong',null,'6-Week Program: '),salary.payment6w),
+        salary.payment4w && h('p',{style:{margin:'0 0 6px',fontSize:13,color:T.text}},'• ',h('strong',null,'Payment Schedule: '),salary.payment4w),
         h('p',{style:{margin:'10px 0 0',fontSize:12,color:T.sub}},'Questions? Contact ',h('a',{href:'mailto:'+(salary.contactEmail||''),style:{color:T.navy}},salary.contactEmail||'isummer@yonsei.ac.kr'),'.'),
         status.submitted && status.updatedAt && h('p',{style:{margin:'8px 0 0',fontSize:11,color:T.sub}},'Last updated: ',status.updatedAt)
       ),
