@@ -485,7 +485,9 @@ function App(){
           h('p',{style:{fontSize:11,color:T.sub,textAlign:'center',margin:'16px 0 0',lineHeight:1.5,display:'flex',alignItems:'center',justifyContent:'center',gap:4}},
             Icons.shield(),' A 6-digit code will be sent to your registered email(s)')
         ),
-        h('p',{style:{textAlign:'center',fontSize:11,color:'rgba(255,255,255,.4)',marginTop:20}},'Office of International Affairs, Yonsei University')
+        h('p',{style:{textAlign:'center',fontSize:11,color:'rgba(255,255,255,.4)',marginTop:20}},'Office of International Affairs, Yonsei University',
+          h('span',{style:{margin:'0 6px'}},'·'),
+          h('a',{href:'https://oia.yonsei.ac.kr/privacy.php?mid=m00_01',target:'_blank',rel:'noopener',style:{color:'rgba(255,255,255,.55)'}},'Privacy Policy'))
       )
     );
   }
@@ -1792,6 +1794,10 @@ function App(){
       setJustSaved(false);
     }
 
+    // v2 ④ 국외이전 대상: 거래은행 국가가 한국이 아닌 경우 (서버도 같은 기준으로 재검증)
+    var _countryVal = String(form.country||'').trim();
+    var isOverseasBank = !!_countryVal && _countryVal.toUpperCase()!=='N/A' && !/korea|한국|대한민국/i.test(_countryVal);
+
     function submit(){
       setFormError(''); setJustSaved(false);
       // 필수필드 검증 — 빈칸이면 제출 차단 (해당 없는 항목은 N/A 입력 안내)
@@ -1826,8 +1832,12 @@ function App(){
         setFormError('Please fill in all required fields (enter N/A if not applicable): '+missing.join(', '));
         return;
       }
+      if(!form.idType){setFormError('Please select Korean national or Foreign national in Section 1.');return;}
       if(!form.attestation){setFormError('Please confirm the attestation in Section 4.');return;}
-      if(!form.consent){setFormError('Please confirm the consent of personal information in Section 4.');return;}
+      if(!form.consent){setFormError('Please check consent ① (collection and use of personal information) in Section 4.');return;}
+      if(form.idType==='foreign'&&!form.consentUid){setFormError('Please check consent ② (unique identifying information) in Section 4.');return;}
+      if(!form.consentThirdParty){setFormError('Please check consent ③ (third-party provision) in Section 4.');return;}
+      if(isOverseasBank&&!form.consentOverseas){setFormError('Please check consent ④ (overseas transfer) in Section 4.');return;}
       setSaving(true);
       var token = sessionStorage.getItem('portal_token');
       callApi('saveSalaryDisbursement',{token:token,data:form}).then(function(res){
@@ -2025,7 +2035,28 @@ function App(){
         sectionHead('Section 1. Personal Information (개인정보)'),
         fieldText({label:'Full Name of Faculty (either Korean or English)',kr:'이름 (한국어 또는 영어)',field:'fullName',required:true}),
         fieldText({label:'Date of Birth',kr:'생년월일',field:'dateOfBirth',locked:true,placeholder:'YYYY-MM-DD'}),
-        fieldText({label:'Passport No., Alien Registration No. or Korean Registration No.',kr:'여권번호, 외국인등록번호 또는 주민등록번호',field:'passportOrArc',required:true}),
+        // v2: 내·외국인 분기 — 내국인=주민등록번호(법령근거 고지, 동의 불요) / 외국인=여권·외국인등록번호(②동의 필수)
+        h('div',{style:{marginBottom:14}},
+          h('label',{style:labelStyle},'Are you a Korean national or a foreign national?',requiredStar,
+            h('span',{style:krSub},'내국인/외국인 여부 — 입력할 신분번호 종류와 Section 4의 동의 항목이 결정됩니다.')),
+          h('div',{style:{display:'flex',flexWrap:'wrap',gap:8}},
+            [{v:'korean',en:'Korean national',kr:'내국인 — 주민등록번호 입력'},
+             {v:'foreign',en:'Foreign national',kr:'외국인 — 여권번호/외국인등록번호 입력'}].map(function(o){
+              var active=form.idType===o.v;
+              return h('label',{key:o.v,style:{display:'flex',alignItems:'flex-start',gap:8,flex:'1 1 220px',padding:'10px 14px',border:'1.5px solid '+(active?T.navy:T.bdr),borderRadius:8,cursor:formLocked?'not-allowed':'pointer',background:active?'rgba(0,55,100,.06)':'#fff',opacity:formLocked&&!active?0.6:1}},
+                h('input',{type:'radio',name:'idType',value:o.v,checked:active,disabled:formLocked,onChange:function(){update('idType',o.v)},style:{marginTop:3}}),
+                h('span',{style:{lineHeight:1.4}},
+                  h('span',{style:{display:'block',fontSize:13,fontWeight:600,color:active?T.navy:T.text}},o.en),
+                  h('span',{style:{display:'block',fontSize:12,color:T.sub,marginTop:2}},o.kr)));
+            }))
+        ),
+        form.idType==='korean'
+          ? fieldText({label:'Korean Resident Registration No.',kr:'주민등록번호 — 법령(소득세법상 원천징수 의무)에 근거하여 수집되며 별도 동의 대상이 아닙니다 (Section 4 안내 참조)',field:'passportOrArc',required:true})
+        : form.idType==='foreign'
+          ? fieldText({label:'Passport No. or Alien Registration No.',kr:'여권번호 또는 외국인등록번호 — Section 4의 고유식별정보 동의(②)가 필요합니다',field:'passportOrArc',required:true})
+        : formLocked
+          ? fieldText({label:'Passport No., Alien Registration No. or Korean Registration No.',kr:'여권번호, 외국인등록번호 또는 주민등록번호',field:'passportOrArc',required:true})
+          : null,
         fieldText({label:'Nationality',kr:'국적',field:'nationality',required:true}),
         fieldText({label:'Telephone No.',kr:'연락처',field:'telephone',required:true,placeholder:'e.g., +82-10-1234-5678'})
       ),
@@ -2070,17 +2101,60 @@ function App(){
         h('div',{style:{marginBottom:8,padding:'12px 14px',background:'#f8f9fb',borderRadius:8}},
           fieldCheckbox({field:'attestation',required:true,label:'I attest that all information provided above is true, and I will bear responsibility if any disadvantage occurs from false indication of the information.',kr:'본인은 위 정보가 모두 사실임을 확인하며, 허위 기재로 인한 불이익이 발생할 경우 그에 대한 책임을 부담합니다.'})
         ),
-        h('div',{style:{padding:'12px 14px',background:'#f8f9fb',borderRadius:8}},
+        // ── v2 (2026-08-21 확정): [고지] 법령근거 처리 — 주민등록번호, 동의 체크 없음 ──
+        h('div',{style:{padding:'12px 14px',background:'#f8f9fb',borderRadius:8,marginBottom:8}},
+          h('p',{style:{fontSize:12,color:T.sub,margin:0,lineHeight:1.6}},
+            h('strong',{style:{color:T.text}},'Legal Basis for Processing (동의 없이 처리되는 항목)'),h('br'),
+            'The Korean Resident Registration Number is collected within the scope necessary to fulfill statutory withholding and reporting obligations (Article 145 of the Income Tax Act, etc.) and is therefore processed without separate consent under Articles 15(1)2 and 24-2 of the Personal Information Protection Act. ',
+            h('em',null,'주민등록번호는 법령상 원천징수·지급명세서 제출 의무(소득세법 제145조 등) 이행에 필요한 범위에서 수집되며, 「개인정보 보호법」 제15조제1항제2호 및 제24조의2에 따라 별도 동의 없이 처리됩니다.'))),
+        // ── ① 수집·이용 동의 (필수) ──
+        h('div',{style:{padding:'12px 14px',background:'#f8f9fb',borderRadius:8,marginBottom:8}},
           h('p',{style:{fontSize:12,color:T.sub,margin:'0 0 10px',lineHeight:1.6}},
-            h('strong',{style:{color:T.text}},'Consent to Collection and Use of Personal Information (개인정보 수집·이용 동의)'),h('br'),h('br'),
-            h('strong',null,'1. Purpose / 목적: '),'Salary disbursement and overseas remittance processing, fulfillment of the employment contract, and faculty personnel and tax/withholding reporting. ',h('em',null,'급여 지급 및 외화송금 처리, 고용계약 이행, 교원 인사 및 세무·원천징수 신고.'),h('br'),h('br'),
-            h('strong',null,'2. Items Collected / 수집 항목: '),'Full Name, Date of Birth, Passport No. / Alien Registration No., Nationality, Telephone, Address, tax-residency information, and bank account details (beneficiary name, bank name, account number, branch, bank address, SWIFT / ABA). ',h('em',null,'성명, 생년월일, 여권번호/외국인등록번호, 국적, 전화번호, 주소, 세무상 거주 정보, 은행 계좌정보(예금주, 은행명, 계좌번호, 지점, 은행 주소, SWIFT/ABA).'),h('br'),h('br'),
-            h('strong',null,'3. Provision to Third Parties / 제3자 제공: '),'Bank account information is provided to financial institutions (remitting/receiving banks) solely to process the salary remittance. ',h('em',null,'계좌정보는 급여 송금 처리를 위해 금융기관(송금·수취 은행)에 제공됩니다.'),h('br'),h('br'),
-            h('strong',null,'4. Retention Period / 보유·이용 기간: '),'Retained for the period required by relevant laws (e.g., tax and accounting records), then destroyed. ',h('em',null,'관련 법령에서 정한 기간(예: 세무·회계 보존기간) 동안 보유 후 파기.'),h('br'),h('br'),
-            h('em',null,'※ You have the right to refuse consent. However, as this information is required to process your salary, refusal will make salary disbursement impossible. 본인은 동의를 거부할 권리가 있으나, 위 정보는 급여 처리를 위해 필요하므로 거부 시 급여 지급이 불가능합니다.')
-          ),
-          fieldCheckbox({field:'consent',required:true,label:'I consent to the collection, use, and third-party provision of my personal information as described above.',kr:'본인은 위와 같이 개인정보를 수집·이용 및 제3자 제공하는 데 동의합니다.'})
-        )
+            h('strong',{style:{color:T.text}},'① Consent to Collection and Use of Personal Information (개인정보 수집·이용 동의)'),h('br'),h('br'),
+            h('strong',null,'Purpose / 목적: '),'Salary disbursement and overseas remittance, faculty personnel administration, tax and withholding reporting. ',h('em',null,'급여 지급 및 외화송금 처리, 교원 인사관리, 세무·원천징수 신고.'),h('br'),h('br'),
+            h('strong',null,'Items / 수집 항목: '),'Full name, date of birth, nationality, telephone, address, e-mail, tax-residency information, and bank account details (beneficiary name, bank name, account number, branch, bank address, SWIFT/ABA). ',h('em',null,'성명, 생년월일, 국적, 전화번호, 주소, 이메일, 세무상 거주지 정보, 은행 계좌정보(예금주명, 은행명, 계좌번호, 지점, 은행 주소, SWIFT/ABA).'),h('br'),h('br'),
+            h('strong',null,'Retention / 보유·이용 기간: '),'Five (5) years following the statutory filing deadline of the tax period in which payment is made — or seven (7) years for offshore transactions such as remittances to overseas accounts — then destroyed without delay (Framework Act on National Taxes, Article 85-3). ',h('em',null,'지급일이 속한 과세기간의 법정 신고기한 경과 후 5년(국외 계좌 송금 등 역외거래는 7년) 보유 후 지체 없이 파기 (국세기본법 제85조의3).')),
+          fieldCheckbox({field:'consent',required:true,label:'[Required] I consent to the collection and use of my personal information as described above.',kr:'[필수] 위와 같이 개인정보를 수집·이용하는 데 동의합니다.'})
+        ),
+        // ── ② 고유식별정보 동의 — 외국 교원만 노출 (시행령 17조 중요표시: 강조 박스) ──
+        form.idType==='foreign'&&h('div',{style:{padding:'12px 14px',background:'#fdf6ec',border:'1px solid #f0d9b0',borderRadius:8,marginBottom:8}},
+          h('p',{style:{fontSize:12,color:T.sub,margin:'0 0 10px',lineHeight:1.6}},
+            h('strong',{style:{color:T.text,fontSize:13}},'② Consent to Collection and Use of ',h('span',{style:{color:'#b45309'}},'Unique Identifying Information'),' (고유식별정보 수집·이용 동의)'),h('br'),h('br'),
+            h('strong',null,'Purpose / 목적: '),'Beneficiary identity verification for overseas remittance; tax reporting for foreign faculty. ',h('em',null,'외화송금 시 수취인 본인 확인, 외국인 교원 세무 신고.'),h('br'),h('br'),
+            h('strong',null,'Items / 수집 항목: '),h('strong',{style:{color:'#b45309'}},'Passport Number or Alien Registration Number'),'. ',h('em',null,'여권번호 또는 외국인등록번호.'),h('br'),h('br'),
+            h('strong',null,'Retention / 보유·이용 기간: '),'Same as ① above. ',h('em',null,'①과 동일.')),
+          fieldCheckbox({field:'consentUid',required:true,label:'[Required] I consent to the collection and use of the unique identifying information above.',kr:'[필수] 위 고유식별정보의 수집·이용에 동의합니다.'})
+        ),
+        // ── ③ 제3자 제공 동의 (필수) ──
+        h('div',{style:{padding:'12px 14px',background:'#fdf6ec',border:'1px solid #f0d9b0',borderRadius:8,marginBottom:8}},
+          h('p',{style:{fontSize:12,color:T.sub,margin:'0 0 10px',lineHeight:1.6}},
+            h('strong',{style:{color:T.text,fontSize:13}},'③ Consent to ',h('span',{style:{color:'#b45309'}},'Provision of Personal Information to Third Parties'),' (개인정보 제3자 제공 동의)'),h('br'),h('br'),
+            h('strong',null,'Recipients / 제공받는 자: '),'Woori Bank (remitting bank, via the university finance team) and the receiving bank designated by you. ',h('em',null,'우리은행(송금은행, 재무팀 경유) 및 신청인이 지정한 수취은행.'),h('br'),h('br'),
+            h('strong',null,'Purpose / 제공 목적: '),'Execution and settlement of the salary remittance. ',h('em',null,'급여 송금의 실행 및 정산.'),h('br'),h('br'),
+            h('strong',null,'Items / 제공 항목: '),'Beneficiary name, bank name, account number, branch, bank address, SWIFT/ABA, remittance amount. ',h('em',null,'예금주명, 은행명, 계좌번호, 지점, 은행 주소, SWIFT/ABA, 송금액.'),h('br'),h('br'),
+            h('strong',null,"Recipients' retention / 제공받는 자의 보유기간: "),'The period prescribed by applicable laws and each institution’s own policy. ',h('em',null,'해당 금융기관의 관련 법령 및 내부 방침에 따른 기간.')),
+          fieldCheckbox({field:'consentThirdParty',required:true,label:'[Required] I consent to the provision of my personal information to the third parties above.',kr:'[필수] 위와 같이 개인정보를 제3자에게 제공하는 데 동의합니다.'})
+        ),
+        // ── ④ 국외이전 동의 — 해외 계좌(거래은행 국가≠한국)만 노출 ──
+        isOverseasBank&&h('div',{style:{padding:'12px 14px',background:'#fdf6ec',border:'1px solid #f0d9b0',borderRadius:8,marginBottom:8}},
+          h('p',{style:{fontSize:12,color:T.sub,margin:'0 0 10px',lineHeight:1.6}},
+            h('strong',{style:{color:T.text,fontSize:13}},'④ Consent to ',h('span',{style:{color:'#b45309'}},'Transfer of Personal Information Abroad'),' (개인정보 국외이전 동의)'),h('br'),h('br'),
+            h('strong',null,'Transferees / 이전받는 자: '),'The overseas receiving bank and any intermediary banks designated by you. ',h('em',null,'신청인이 지정한 국외 수취은행 및 중계은행.'),h('br'),h('br'),
+            h('strong',null,'Country / 이전 국가: '),'The country in which your designated account is located. ',h('em',null,'지정 계좌의 소재 국가.'),h('br'),h('br'),
+            h('strong',null,'Time and method / 이전 일시·방법: '),'Electronic transmission via the SWIFT network on each salary payment date. ',h('em',null,'급여 지급일에 SWIFT 전문을 통한 전자적 전송.'),h('br'),h('br'),
+            h('strong',null,'Items / 이전 항목: '),'Beneficiary name, account number, bank name/branch/address, SWIFT/ABA, remittance amount, address. ',h('em',null,'예금주명, 계좌번호, 은행명·지점·주소, SWIFT/ABA, 송금액, 주소.'),h('br'),h('br'),
+            h('strong',null,"Transferees' purpose and retention / 이용목적·보유기간: "),'Crediting the remitted funds; retained for the period prescribed by the financial laws of that country. ',h('em',null,'송금 대금의 입금 처리; 해당 국가의 금융 관련 법령에 따른 기간.'),h('br'),h('br'),
+            h('em',null,'※ You may refuse this consent. If you refuse, please designate a domestic (Korean) bank account instead, or contact the OIA. 본 동의는 거부할 수 있으며, 거부 시 국내(한국) 계좌를 지정해 주시기 바랍니다.')),
+          fieldCheckbox({field:'consentOverseas',required:true,label:'[Required] I consent to the transfer of my personal information abroad as described above.',kr:'[필수] 위와 같이 개인정보를 국외로 이전하는 데 동의합니다.'})
+        ),
+        // ── [고지] 권리 안내 · 문의처 ──
+        h('div',{style:{padding:'12px 14px',background:'#f8f9fb',borderRadius:8}},
+          h('p',{style:{fontSize:12,color:T.sub,margin:0,lineHeight:1.6}},
+            h('strong',{style:{color:T.text}},'Your Rights / 정보주체의 권리'),h('br'),
+            'You have the right to refuse any of the consents above. However, the items marked [Required] are necessary to process your salary; if you refuse, salary disbursement cannot be completed. You may at any time request access to, correction of, deletion of, or suspension of processing of your personal information. ',
+            h('em',null,'위 각 동의는 거부하실 수 있습니다. 다만 [필수] 항목은 급여 처리에 반드시 필요하므로, 거부 시 급여 지급이 완료될 수 없습니다. 정보주체는 언제든지 열람·정정·삭제·처리정지를 요구하실 수 있습니다.'),h('br'),h('br'),
+            h('strong',{style:{color:T.text}},'Contact / 문의처: '),'Office of International Affairs — ',h('a',{href:'mailto:'+(salary.contactEmail||'isummer@yonsei.ac.kr'),style:{color:T.navy}},salary.contactEmail||'isummer@yonsei.ac.kr'),h('br'),
+            h('strong',{style:{color:T.text}},'Privacy Policy / 개인정보처리방침: '),h('a',{href:'https://oia.yonsei.ac.kr/privacy.php?mid=m00_01',target:'_blank',rel:'noopener',style:{color:T.navy}},'OIA Privacy Policy (연세대학교 국제처 개인정보처리방침)')))
       ),
       formError && h('div',{style:{padding:'10px 14px',background:'#fef2f2',color:T.red,borderRadius:8,fontSize:13}},formError),
       justSaved && h('div',{style:{padding:'10px 14px',background:T.greenL,color:T.green,borderRadius:8,fontSize:13,fontWeight:500,display:'flex',alignItems:'center',gap:6}},Icons.check(),' Submitted successfully.'),
