@@ -1125,6 +1125,12 @@ function App(){
     var _evl=useState(null),eventsList=_evl[0],setEventsList=_evl[1];
     var _evd=useState(false),eventsLoading=_evd[0],setEventsLoading=_evd[1];
     var _eve=useState(null),editEvent=_eve[0],setEditEvent=_eve[1];
+    var _ct=useState(false),contractsOpen=_ct[0],setContractsOpen=_ct[1];
+    var _ctl=useState(null),contractsList=_ctl[0],setContractsList=_ctl[1];
+    var _ctu=useState(''),contractsSheetUrl=_ctu[0],setContractsSheetUrl=_ctu[1];
+    var _ctd=useState(false),contractsLoading=_ctd[0],setContractsLoading=_ctd[1];
+    var _ctg=useState(false),generating=_ctg[0],setGenerating=_ctg[1];
+    var _ctr=useState(null),genReport=_ctr[0],setGenReport=_ctr[1];
 
     function loadRoster(){
       var token=sessionStorage.getItem('portal_token');
@@ -1340,6 +1346,36 @@ function App(){
         if(!res.success){alert(res.message);return;}
         loadEvents();
       }).catch(function(){alert('Network error.');});
+    }
+
+    // ── Contracts ──
+    function loadContracts(){
+      setContractsLoading(true);
+      var token=sessionStorage.getItem('portal_token');
+      callApi('adminListContracts',{token:token}).then(function(res){
+        setContractsLoading(false);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message||'Failed to load contracts.');return;}
+        setContractsList(res.contracts||[]);
+        setContractsSheetUrl(res.sheetUrl||'');
+      }).catch(function(){setContractsLoading(false);alert('Network error.');});
+    }
+    function toggleContracts(){
+      if(contractsOpen){setContractsOpen(false);return;}
+      setContractsOpen(true);
+      if(!contractsList) loadContracts();
+    }
+    function generateContracts(){
+      if(!confirm('계약 대상 교원(국내(전임) 제외)의 계약 행을 생성합니다.\n\n이미 행이 있는 교번은 건너뛰므로 다시 실행해도 안전합니다.\n계속할까요?')) return;
+      var token=sessionStorage.getItem('portal_token');
+      setGenerating(true);setGenReport(null);
+      callApi('adminGenerateContracts',{token:token}).then(function(res){
+        setGenerating(false);
+        if(res.expired){handleLogout();return;}
+        if(!res.success){alert(res.message||'Generation failed.');return;}
+        setGenReport(res);
+        loadContracts();
+      }).catch(function(){setGenerating(false);alert('Network error.');});
     }
 
     function openSalaryDetail(eid){
@@ -1578,6 +1614,46 @@ function App(){
                   : h('span',{style:{fontSize:11,fontWeight:600,color:T.sub,whiteSpace:'nowrap'}},ev.responseCount+' resp.'),
                 h('button',{onClick:function(){setEditEvent(Object.assign({},ev,{optionsText:(ev.options||[]).join('\n')}))},style:{background:'none',border:'none',color:T.navy,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}},'Edit'),
                 h('button',{onClick:function(){deleteEvent(ev)},style:{background:'none',border:'none',color:T.red,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}},'Delete')
+              );
+            })
+          ):null
+        )
+      ),
+      // ── Contracts Management ──
+      h(Card,{style:{padding:0,overflow:'hidden'}},
+        h('div',{onClick:toggleContracts,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 16px',cursor:'pointer',background:contractsOpen?'#f8f9fb':'#fff'}},
+          h('span',{style:{fontSize:14,fontWeight:700,color:T.navy}},'📄 Contracts'),
+          h('span',{style:{fontSize:14,color:T.sub,transform:contractsOpen?'rotate(180deg)':'none',transition:'transform .2s'}},'▾')
+        ),
+        contractsOpen&&h('div',{style:{padding:'0 16px 16px'}},
+          h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,margin:'8px 0'}},
+            h('span',{style:{fontSize:12,color:T.sub}},contractsList?('Rows: '+contractsList.length):''),
+            h('div',{style:{display:'flex',gap:10,alignItems:'center'}},
+              contractsSheetUrl&&h('a',{href:contractsSheetUrl,target:'_blank',rel:'noopener',style:{fontSize:11,color:T.navy,fontWeight:600,whiteSpace:'nowrap'}},'Open Sheet ↗'),
+              h('button',{onClick:generateContracts,disabled:generating,style:{padding:'5px 12px',background:generating?'#9ca3af':T.navy,color:'#fff',border:'none',borderRadius:6,fontSize:12,fontWeight:600,fontFamily:'inherit',cursor:generating?'not-allowed':'pointer'}},generating?'Generating…':'Generate Contract Rows')
+            )
+          ),
+          genReport&&h('div',{style:{padding:'8px 10px',background:'#f8f9fb',borderRadius:8,marginBottom:8,fontSize:12,color:T.text}},
+            h('div',null,h('strong',null,'Added: '),(genReport.added||[]).length,' · ',h('strong',null,'Skipped: '),(genReport.skipped||[]).length),
+            (genReport.added||[]).length>0&&h('div',{style:{marginTop:4,fontFamily:'monospace',fontSize:11,color:T.sub}},
+              (genReport.added||[]).map(function(a,i){return h('div',{key:i,style:{padding:'1px 0'}},a.employeeId+' '+a.name+' — '+a.courses+(a.payment!==''?(' — '+Number(a.payment).toLocaleString()):''));})),
+            (genReport.warnings||[]).length>0&&h('div',{style:{marginTop:6,color:T.amber,fontSize:11}},
+              (genReport.warnings||[]).map(function(w,i){return h('div',{key:i,style:{padding:'1px 0'}},'⚠ '+w);})),
+            (genReport.skipped||[]).length>0&&h('div',{style:{marginTop:6,fontSize:11,color:T.sub}},
+              (genReport.skipped||[]).map(function(sk,i){return h('div',{key:i,style:{padding:'1px 0'}},sk.employeeId+' '+sk.name+' — '+sk.reason);}))
+          ),
+          contractsLoading?h('p',{style:{fontSize:12,color:T.sub,margin:'8px 0 0'}},'Loading…')
+          :contractsList?(contractsList.length===0
+            ?h('p',{style:{fontSize:12,color:T.sub,textAlign:'center',padding:'8px 0'}},'No contract rows yet. Generate Contract Rows 를 눌러 생성하세요.')
+            :contractsList.map(function(ct){
+              var signed=String(ct.status||'').toLowerCase()==='signed';
+              var hasPay=ct.payment!==''&&ct.payment!=null;
+              return h('div',{key:ct.rowIndex,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',borderBottom:'1px solid '+T.bdr,fontSize:13}},
+                h('div',{style:{flex:1,minWidth:0}},
+                  h('div',{style:{fontWeight:600,color:T.text}},ct.name||'—',h('span',{style:{fontWeight:400,color:T.sub,fontSize:11,marginLeft:6}},ct.employeeId)),
+                  h('div',{style:{fontSize:11,color:hasPay?T.sub:T.amber,marginTop:2}},(ct.courses||'—')+' · '+(hasPay?((ct.currency?ct.currency+' ':'')+Number(ct.payment).toLocaleString()):'payment 미입력'))
+                ),
+                h('span',{style:{fontSize:11,fontWeight:700,color:signed?T.green:T.amber,whiteSpace:'nowrap'}},signed?('Signed'+(ct.signedAt?(' · '+ct.signedAt):'')):(ct.status||'Pending'))
               );
             })
           ):null
